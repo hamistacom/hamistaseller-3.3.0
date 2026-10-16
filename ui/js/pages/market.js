@@ -37,6 +37,20 @@ const ORIGIN = {
   sheypoor: "https://www.sheypoor.com",
 };
 const link = (o, url = o.url) => (url.startsWith("http") ? url : `${ORIGIN[o.platform] || ORIGIN.torob}${url}`);
+
+/** ✓ «لینک دقیق» when the backend proved the URL is that product's page, else ⚠ «تأییدنشده». */
+export function linkBadge(status) {
+  if (status === "exact") return h("span", { class: "link-badge exact", title: "لینک مستقیم همین کالا، تأییدشده" }, "✓ لینک دقیق");
+  if (status === "unverified") return h("span", { class: "link-badge unverified", title: "لینک این منبع تأیید نشده؛ ممکن است صفحه دیگری باز شود" }, "⚠ تأییدنشده");
+  return null;
+}
+
+/** Data-confidence pill (green ≥ 75, amber ≥ 45, else red). */
+export function confBadge(score, label = "اعتماد داده") {
+  const n = Math.round(score || 0);
+  const cls = n >= 75 ? "ok" : n >= 45 ? "warn" : "bad";
+  return h("span", { class: `pill ${cls}`, title: `${label} بر پایه پوشش منابع، حجم داده و تطبیق هویت` }, `${label}: ${fa(n)}٪`);
+}
 const SORTS = [
   ["relevance", "مرتبط‌ترین"],
   ["popular", "پربازدیدترین"],
@@ -401,7 +415,8 @@ export async function render(root, params, actions) {
   let mode = remember("mktMode") || "seller";
   let platforms = new Set((remember("mktPlatforms") || "torob,digikala,basalam,emalls").split(",").filter((p) => PNAME[p]));
   let exact = remember("mktExact") !== "0";
-  const q = input({ placeholder: "نام دقیق کالا؛ مثلاً چوب پینگ پنگ، کیسه فریزر، عسل گون", value: params.q || remember("mktQuery") || "" });
+  let webOn = remember("mktWeb") !== "0";
+  const q = input({ placeholder: "نام دقیق کالا؛ چند کالا با «+» یا «یا»، حذف با «-» (مثلاً: عسل یک کیلویی + شهد آزادی -موم)", value: params.q || remember("mktQuery") || "" });
   const brand = brandBox(params.brand || "");
   const margin = input({ type: "number", min: 0, max: 300, dir: "ltr", value: remember("mktMargin") || 25 });
   const minP = input({ inputmode: "numeric", dir: "ltr", placeholder: "از", value: remember("mktMin") || "" });
@@ -425,41 +440,12 @@ export async function render(root, params, actions) {
   const district = input({ placeholder: "مثلاً ونک، سعادت‌آباد", value: remember("mktDistrict") || "" });
   const regionHint = h("span", { class: "small muted" });
   const regionSum = h("span", { class: "chip" });
-  const QUICK = [
-    ["تهران", "تهران"],
-    ["البرز", "کرج"],
-    ["خراسان رضوی", "مشهد"],
-    ["اصفهان", "اصفهان"],
-    ["فارس", "شیراز"],
-    ["آذربایجان شرقی", "تبریز"],
-    ["خوزستان", "اهواز"],
-    ["قم", "قم"],
-  ];
-  const quick = h("div", { class: "chips" });
   const syncRegion = () => {
     const where = [district.value.trim(), city.value || prov.value].filter(Boolean).join("، ");
     regionHint.textContent = where
       ? `دیوار و شیپور در «${city.value || prov.value || "کل ایران"}» جستجو می‌شوند${localOnly.checked ? `؛ فقط فروشندگان «${district.value.trim() || city.value || prov.value}» نگه داشته می‌شوند` : ""}.`
       : "آگهی‌های دیوار و شیپور در کل ایران جستجو می‌شوند.";
     regionSum.textContent = where || "همه ایران";
-    clear(
-      quick,
-      [["", "همه ایران"], ...QUICK].map(([p, c]) =>
-        h(
-          "button",
-          {
-            type: "button",
-            class: `chip click ${p === prov.value && c === city.value ? "on" : ""}`.trim(),
-            onclick: () => {
-              prov.value = p;
-              fillCity(c || "");
-              syncRegion();
-            },
-          },
-          c || "همه ایران",
-        ),
-      ),
-    );
   };
   [prov, city, localOnly].forEach((el) => el.addEventListener("change", syncRegion));
   district.addEventListener("input", syncRegion);
@@ -508,6 +494,28 @@ export async function render(root, params, actions) {
     toast(`پنجره ورود ${name} باز شد؛ وارد حساب شوید و پنجره را ببندید. ورود شما برای جستجوهای بعدی می‌ماند.`, "ok");
     await safe(invoke("market_login", { platform: id }));
   };
+  // «وب»: up to 3 top organic results (always on in B2B mode)
+  const webChip = () => {
+    const wrap = h("span", { class: `src-chip web ${webOn ? "on" : ""}`.trim() });
+    const draw = () =>
+      clear(
+        wrap,
+        h(
+          "button",
+          {
+            type: "button",
+            "aria-pressed": webOn ? "true" : "false",
+            title: "حداکثر ۳ نتیجه معتبر از وب (سایت‌های رسمی، تولیدکننده و فروشگاه)",
+            onclick: () => { webOn = !webOn; draw(); },
+          },
+          h("span", { class: "pb p-web" }, h("i", { "aria-hidden": "true" }, "و")),
+          h("span", {}, "وب"),
+          webOn ? icon("check", "sm") : null,
+        ),
+      );
+    draw();
+    return wrap;
+  };
 
   const go_ = h("button", { class: "btn primary big", type: "button" }, icon("trend", "sm"), "تحلیل");
   const progress = h("div", { class: "mkt-progress", hidden: true });
@@ -517,6 +525,7 @@ export async function render(root, params, actions) {
     [
       ["seller", "فروشنده هستم", "store"],
       ["buyer", "خریدار هستم", "bag"],
+      ["wholesale", "خریدار عمده / B2B", "layers"],
     ],
     mode,
     (v) => {
@@ -549,11 +558,14 @@ export async function render(root, params, actions) {
     remember("mktLocal", localOnly.checked ? "1" : "0");
     remember("mktDistrict", district.value.trim());
     go_.disabled = true;
+    go_.setAttribute("aria-busy", "true");
+    clear(go_, h("span", { class: "spin-dot" }), "در حال تحلیل…");
     progress.hidden = false;
     const line = h("span", { class: "small" }, "در حال آماده‌سازی…");
     const track = h("div", { class: "bar" }, h("i"));
     const log = h("div", { class: "small muted mkt-log" });
-    clear(progress, line, track, log);
+    const stop = h("button", { class: "btn sm danger", type: "button", onclick: (e) => { e.currentTarget.disabled = true; safe(invoke("job_stop", {})); } }, icon("stop", "sm"), "توقف");
+    clear(progress, h("div", { class: "row between" }, line, stop), track, log);
     const ch = newChannel();
     ch.onmessage = (e) => {
       if (e.type === "status") line.textContent = e.message;
@@ -579,9 +591,13 @@ export async function render(root, params, actions) {
       district: district.value.trim(),
       localOnly: localOnly.checked,
       mode,
+      web: webOn || mode === "wholesale",
     };
+    remember("mktWeb", webOn ? "1" : "0");
     const rep = await safe(invoke("market_search", { req, onEvent: ch }));
     go_.disabled = false;
+    go_.removeAttribute("aria-busy");
+    clear(go_, icon("trend", "sm"), "تحلیل");
     progress.hidden = true;
     if (rep) show(rep);
   };
@@ -629,11 +645,10 @@ export async function render(root, params, actions) {
           "details",
           { class: "mkt-more", open: !!(prov.value || district.value) },
           h("summary", {}, icon("map", "sm"), "منطقه (برای دیوار، شیپور و فروشندگان محلی)", regionSum),
-          quick,
           h("div", { class: "mkt-row2" }, field("استان", prov), field("شهر", city), field("محله / منطقه", district), h("label", { class: "check" }, localOnly, h("span", {}, "فقط فروشندگان همین منطقه"))),
           regionHint,
         ),
-        h("div", { class: "row wrap" }, h("span", { class: "label-t" }, "منابع:"), plat),
+        h("div", { class: "row wrap" }, h("span", { class: "label-t" }, "منابع:"), plat, webChip()),
         progress,
       ),
       out,
@@ -833,11 +848,13 @@ export function report(r, { search, mode = "seller" }) {
     ["brands", `برندها و شرکت‌ها (${fa(brandsN)})`, "award"],
     ["sellers", `فروشندگان (${fa(new Set(r.offers.map((o) => o.seller || o.platform)).size)})`, "store"],
     ["channels", `کانال‌های فروش (${fa(r.channels.length)})`, "trend"],
+    ...(r.suppliers?.length ? [["suppliers", `عمده‌فروشان (${fa(r.suppliers.length)})`, "layers"]] : []),
+    ...(r.web?.length ? [["web", `منابع وب (${fa(r.web.length)})`, "globe"]] : []),
     ["history", "روند قیمت", "history"],
   ];
   const body = h("div", { class: "stack" });
   const tabBar = seg(tabs, "summary", (v) => draw(v), "rep-tabs");
-  const draw = (t) => clear(body, { summary, products, same, brands, sellers, channels, history }[t]());
+  const draw = (t) => clear(body, { summary, products, same, brands, sellers, channels, suppliers, web: webTab, history }[t]());
 
   function summary() {
     const validBrandShares = (r.brands || []).filter((b) => !BAD_BRAND_WORDS.has(b.name.trim()));
@@ -932,11 +949,18 @@ export function report(r, { search, mode = "seller" }) {
                 "div",
                 { class: "name-cell" },
                 h("span", { class: "n full", title: o.title }, o.title),
-                h("span", { class: "c" }, [o.brand && !BAD_BRAND_WORDS.has(o.brand.trim()) ? o.brand : "", o.shops ? `در ${fa(o.shops)} فروشگاه` : ""].filter(Boolean).join(" · ")),
+                h("span", { class: "c" }, [o.brand && !BAD_BRAND_WORDS.has(o.brand.trim()) ? o.brand : "", o.shops ? `در ${fa(o.shops)} فروشگاه` : ""].filter(Boolean).join(" · "), o.url ? linkBadge(o.link) : null),
               ),
             ),
             h("td", {}, pbadge(o.platform, true), h("div", { class: "x small" }, METHOD[o.platform] || "")),
-            h("td", { class: "clip" }, o.seller || "—", o.location ? h("div", { class: "x small" }, o.location) : null),
+            h(
+              "td",
+              { class: "clip" },
+              o.sellerUrl
+                ? h("button", { class: "seller-link", type: "button", title: "صفحه فروشنده / غرفه", onclick: () => safe(invoke("open_url", { url: o.sellerUrl })) }, o.seller || "—")
+                : o.seller || "—",
+              o.location ? h("div", { class: "x small" }, o.location) : null,
+            ),
             h(
               "td",
               {},
@@ -1256,6 +1280,86 @@ export function report(r, { search, mode = "seller" }) {
     );
   }
 
+  function suppliers() {
+    const list = r.suppliers || [];
+    if (!list.length) return h("div", { class: "card" }, h("div", { class: "mkt-empty" }, h("div", { class: "ic-box lg" }, icon("layers")), h("h2", {}, "تأمین‌کننده‌ای پیدا نشد"), h("p", { class: "muted" }, "در حالت «خریدار عمده / B2B» دوباره تحلیل کنید تا تولیدکننده‌ها، عمده‌فروش‌ها و پخش‌کننده‌ها جستجو شوند.")));
+    return h(
+      "div",
+      { class: "stack" },
+      h(
+        "div",
+        { class: "advice" },
+        h("span", { class: "ic-box" }, icon("layers")),
+        h("div", { class: "grow stack tight" }, h("b", {}, `${fa(list.length)} تأمین‌کننده B2B شناسایی شد.`), h("span", { class: "small muted" }, "فقط اطلاعات عمومی کسب‌وکار؛ هر مورد با نوع، اعتماد داده و لینک مستقیم. «درخواست استعلام» یک متن آماده می‌سازد (ارسال خودکار نمی‌شود).")),
+        h("button", { class: "btn tonal sm", type: "button", onclick: () => rfqModal(r.query) }, icon("send", "sm"), "ساخت درخواست استعلام"),
+      ),
+      h(
+        "div",
+        { class: "sup-grid" },
+        list.map((sp) =>
+          h(
+            "div",
+            { class: "card stack sup-card" },
+            h("div", { class: "row between" }, h("b", {}, sp.name || sp.source), h("span", { class: "pill" }, sp.kind)),
+            h("div", { class: "sup-meta" }, [
+              sp.city ? `${sp.city}` : "",
+              sp.moq ? `حداقل سفارش: ${sp.moq}` : "",
+              sp.phone ? `تماس: ${sp.phone}` : "",
+              sp.email || "",
+            ].filter(Boolean).map((x) => h("span", { class: "small muted" }, x))),
+            sp.terms?.length ? h("div", { class: "chips" }, sp.terms.slice(0, 6).map((t) => h("span", { class: "chip" }, t))) : null,
+            h(
+              "div",
+              { class: "row between" },
+              confBadge(sp.confidence, "اعتماد داده"),
+              h("button", { class: "btn ghost sm", type: "button", onclick: () => safe(invoke("open_url", { url: sp.url || sp.website })) }, icon("external", "sm"), "صفحه"),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  function webTab() {
+    const list = r.web || [];
+    if (!list.length) return h("div", { class: "card" }, h("div", { class: "mkt-empty" }, icon("globe"), h("h2", {}, "منبع وبی یافت نشد")));
+    return h(
+      "div",
+      { class: "card flush" },
+      h("div", { class: "card-h pad" }, h("h2", {}, "منابع وب (بهترین نتایج)"), h("span", { class: "small muted" }, "حداکثر ۳ نتیجه ارگانیک معتبر، با داده ساخت‌یافته صفحه")),
+      h(
+        "div",
+        { class: "web-list" },
+        list.map((w) =>
+          h(
+            "div",
+            { class: "card web-row" },
+            h(
+              "div",
+              { class: "row between wrap" },
+              h("div", { class: "stack tight" }, h("b", {}, w.productName || w.title), h("span", { class: "small muted ltr" }, w.domain)),
+              h("span", { class: "pill" }, w.pageType),
+            ),
+            h(
+              "div",
+              { class: "row wrap tight-row" },
+              w.price ? h("span", { class: "chip" }, toman(w.price)) : null,
+              w.availability ? h("span", { class: "chip" }, w.availability) : null,
+              w.brand ? h("span", { class: "chip" }, w.brand) : null,
+              h("span", { class: "small muted" }, `ارتباط ${fa(w.relevance)}٪`),
+              confBadge(w.confidence, "اعتماد"),
+            ),
+            h(
+              "div",
+              { class: "row" },
+              h("button", { class: "btn ghost sm", type: "button", onclick: () => safe(invoke("open_url", { url: w.productUrl || w.url })) }, icon("external", "sm"), w.productUrl ? "صفحه محصول" : "باز کردن"),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   function history() {
     const hs = r.history || [];
     const first = hs[0]?.[1],
@@ -1347,8 +1451,7 @@ export function report(r, { search, mode = "seller" }) {
     head,
     tools,
     filtered.length ? h("p", { class: "small muted filt" }, icon("info", "sm"), `کنار گذاشته شد: ${filtered.join("، ")}.`) : null,
-    tabBar,
-    body,
+    h("div", { class: "rep-shell" }, tabBar, body),
   );
   draw("summary");
   return el;
@@ -1416,6 +1519,39 @@ async function addBrand(name, category) {
 }
 
 /** Suppliers → a new bank, then their phone numbers are looked up by exact name. */
+/** «درخواست استعلام قیمت» (RFQ): the user fills what they know, gets a ready-to-copy message. */
+function rfqModal(product) {
+  const f = {
+    product: input({ value: product || "" }),
+    quantity: input({ placeholder: "مثلاً ۵۰ کیلوگرم یا ۱۰ کارتن" }),
+    city: input({ placeholder: "شهر مقصد" }),
+    packaging: input({ placeholder: "نوع بسته‌بندی (اختیاری)" }),
+    payment: input({ placeholder: "شرایط پرداخت (اختیاری)" }),
+    leadTime: input({ placeholder: "زمان تأمین (اختیاری)" }),
+    targetPrice: input({ placeholder: "قیمت هدف (اختیاری)" }),
+  };
+  const out = h("textarea", { class: "input ai-q", readonly: true, placeholder: "متن استعلام اینجا ساخته می‌شود…" });
+  const build = async () => {
+    const text = await safe(invoke("market_rfq", { req: { product: f.product.value, quantity: f.quantity.value, city: f.city.value, packaging: f.packaging.value, payment: f.payment.value, leadTime: f.leadTime.value, targetPrice: f.targetPrice.value } }));
+    if (text) out.value = text;
+  };
+  modal({
+    title: "درخواست استعلام قیمت (RFQ)",
+    sub: "یک متن حرفه‌ای برای فرستادن به تأمین‌کننده؛ چیزی خودکار ارسال نمی‌شود.",
+    wide: true,
+    body: [
+      h("div", { class: "grid-2" }, field("کالا", f.product), field("تعداد / مقدار", f.quantity), field("شهر مقصد", f.city), field("بسته‌بندی", f.packaging), field("شرایط پرداخت", f.payment), field("زمان تأمین", f.leadTime), field("قیمت هدف", f.targetPrice)),
+      field("متن آماده", out),
+    ],
+    actions: [
+      { label: "ساخت متن", kind: "primary", icon: "refresh", onClick: async () => { await build(); return false; } },
+      { label: "کپی", icon: "copy", onClick: () => out.value && copy(out.value) },
+      { label: "بستن" },
+    ],
+  });
+  build();
+}
+
 function seedModal(query, sellers) {
   const name = input({ value: `تأمین‌کنندگان ${query}` });
   const picked = new Set(sellers.slice(0, 40));

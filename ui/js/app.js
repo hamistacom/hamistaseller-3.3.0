@@ -3,7 +3,8 @@ import { EN, setLang } from "./i18n.js";
 import { $, h, clear, icon, invoke, fa, faDigits, toast, modal, safe, bar, jdate, ago, utc } from "./core.js";
 import { routesFor, SPACES } from "./modules.js";
 import { app, refreshLists, refreshLicense, on, go } from "./state.js";
-import { onJob, stopJob, clearResult, adoptRunning, followScheduled } from "./jobs.js";
+import { adoptRunning, followScheduled } from "./jobs.js";
+import { startOps, opsDrawer } from "./ops.js";
 import { openCard } from "./pages/card.js";
 import { licenseModal } from "./pages/settings.js";
 
@@ -192,37 +193,6 @@ async function drawInsight() {
       h("button", { class: "btn sm insight-later", type: "button", onclick: () => { insightClosed = true; box.hidden = true; } }, "بعداً"),
       h("button", { class: "btn sm insight-go", type: "button", onclick: go1 }, "انجام بده"),
     ),
-  );
-}
-
-// ---------------- sidebar job card ----------------
-
-function drawJob(j) {
-  const card = $("#jobcard");
-  if (!j.running && !j.result) {
-    card.hidden = true;
-    return;
-  }
-  card.hidden = false;
-  const p = j.progress;
-  const s = j.sending;
-  let ratio = 0;
-  let line = j.status;
-  if (j.kind === "scan" && p) {
-    ratio = p.target ? p.checked / p.target : 0;
-    line = `«${p.keyword}» — ${fa(p.found)} مخاطب جدید از ${fa(p.checked)}`;
-  } else if (s) {
-    ratio = s.total ? (s.sent + s.failed + s.skipped) / s.total : 0;
-    line = `${fa(s.sent)} ارسال از ${fa(s.total)}`;
-  }
-  clear(
-    card,
-    h("div", { class: "title" }, h("span", { class: `dot ${j.running ? "live" : ""}` }), j.running ? j.title : "آخرین عملیات"),
-    h("div", { class: "small muted" }, j.captcha ? "منتظر تأیید یا ورود در پنجره مرورگر…" : j.running ? line : j.result?.message || ""),
-    j.running ? bar(ratio) : null,
-    j.running
-      ? h("button", { class: "btn sm danger", type: "button", onclick: (e) => { e.currentTarget.disabled = true; safe(stopJob()); } }, icon("stop", "sm"), "توقف")
-      : h("button", { class: "btn sm ghost", type: "button", onclick: clearResult }, "بستن"),
   );
 }
 
@@ -436,7 +406,8 @@ async function boot() {
     drawInsight();
     window.addEventListener("hashchange", () => drawInsight());
     await refreshLists();
-    onJob(drawJob);
+    document.body.append(opsDrawer());
+    startOps();
     followScheduled();
     on("license", drawLicense);
     drawLicense(app.info.license);

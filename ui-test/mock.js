@@ -230,6 +230,9 @@
     license_status: () => license,
     lists: () => lists,
     job_current: () => null,
+    jobs_list: () => [],
+    jobs_clear: () => null,
+    market_rfq: () => "با سلام و احترام،\n...",
     dashboard: () => ({ total: places.length, mobile: 137, landline: 69, email: 35, social: 58, website: 35, person: 91, today: 8, week: 41, prevWeek: 33, contacted: 69, interested: 23, customers: 11, interestedWaiting: empty ? 0 : 6, sentWeek: 120, sentPrevWeek: 96, month: 98, prevMonth: 71, contacts: 412, daily, weekly: Array.from({ length: 12 }, (_, i) => [`2026-${pad(7 + Math.floor(i / 4), 2)}-${pad(1 + (i % 4) * 7, 2)}`, empty ? 0 : [12, 18, 9, 22, 30, 26, 19, 34, 41, 28, 37, 46][i]]), sources: [["maps", 82, 31], ["neshan", 24, 18], ["telegram", 12, 9], ["balad", 9, 6], ["import", 10, 0]], topKeywords: empty ? [] : [["کافه", 41], ["رستوران", 30], ["دندانپزشکی", 26], ["آرایشگاه", 22], ["املاک", 18]], topCities: empty ? [] : [["تهران", 52], ["اصفهان", 35], ["کرج", 28], ["شیراز", 22]] }),
     places: (a) => {
       const rows = filterPlaces(a.filter);
