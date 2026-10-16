@@ -98,6 +98,42 @@ pub struct BrandReport {
     pub opportunities: Vec<String>,
     pub threats: Vec<String>,
     pub category_run: i64, // the saved product search used (0 = none)
+    // ---- trust (v3.3): how much of the analysis rests on real evidence ----
+    /// 0–100: how well-sourced this analysis is (coverage, freshness, sample size, entity match).
+    /// Kept apart from `overall` (the brand's health): a strong brand can still have low confidence.
+    pub confidence: i64,
+    /// What the confidence rests on, shown to the user (each 0–100).
+    pub signals: Vec<Signal>,
+    /// Likely entities when the name was ambiguous (shown instead of guessing). Empty = resolved.
+    pub candidates: Vec<Candidate>,
+    /// Where each headline fact came from (brand/site/market/social), for «منبع این عدد؟».
+    pub evidence: Vec<Evidence>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Signal {
+    pub key: String, // coverage | freshness | sample | entity | digital
+    pub label: String,
+    pub score: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Candidate {
+    pub name: String,
+    pub kind: String, // برند | غرفه/فروشگاه | شرکت | فروشنده
+    pub detail: String,
+    pub url: String,
+    pub score: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Evidence {
+    pub fact: String,
+    pub source: String,
+    pub url: String,
 }
 
 /// (run id, brand id, name, overall score, analysed at)
@@ -641,6 +677,52 @@ pub fn enrich(r: &mut BrandReport, name: &str, mine: Option<&Report>, category: 
     if r.channels.len() == 1 {
         r.threats.push("وابستگی به یک کانال فروش: تغییر سیاست همان پلتفرم کل فروش را تحت تأثیر می‌گذارد.".into());
     }
+    assess(r, &offers);
+}
+
+/// Fills the trust block: how well-sourced the analysis is (confidence + its signals) and where the
+/// headline facts came from (evidence). `offers` = this brand's own offers found in the market.
+fn assess(r: &mut BrandReport, offers: &[&crate::market::Offer]) {
+    let clamp = |v: f64| v.clamp(0.0, 100.0).round() as i64;
+    let platforms = r.channels.len();
+    // coverage: in how many channels and how many searches the brand was actually seen
+    let coverage = clamp(platforms as f64 * 30.0 + (r.market.searches.min(3) as f64) * 10.0);
+    // sample: how many offers and reviews back the numbers
+    let sample = clamp((offers.len() as f64) * 9.0 + ((r.market.reviews as f64 + 1.0).log10() / 3.0) * 40.0);
+    // entity match: do we have a confirmed identity (offers found, and a site or Instagram)?
+    let has_digital = r.site.ok || r.insta.followers.is_some();
+    let entity = clamp(if offers.is_empty() { 15.0 } else { 55.0 } + if has_digital { 30.0 } else { 0.0 } + (platforms.min(2) as f64) * 7.5);
+    // freshness: a live market read was done now; without it, the analysis leans on older snapshots
+    let freshness = if offers.is_empty() && r.market.searches == 0 { 30 } else { 85 };
+    let digital = r.digital.map_or(20.0, |d| d) as i64;
+    let signals = vec![
+        Signal { key: "coverage".into(), label: "پوشش منابع".into(), score: coverage },
+        Signal { key: "sample".into(), label: "حجم داده".into(), score: sample },
+        Signal { key: "entity".into(), label: "تطبیق هویت برند".into(), score: entity },
+        Signal { key: "freshness".into(), label: "تازگی داده".into(), score: freshness },
+        Signal { key: "digital".into(), label: "حضور دیجیتال".into(), score: digital },
+    ];
+    // confidence weights coverage and entity match the most
+    let w: &[(i64, f64)] = &[(coverage, 1.2), (sample, 1.0), (entity, 1.3), (freshness as i64, 0.8), (digital, 0.7)];
+    let sum: f64 = w.iter().map(|(v, k)| *v as f64 * k).sum();
+    let wsum: f64 = w.iter().map(|(_, k)| k).sum();
+    r.confidence = clamp(sum / wsum);
+    r.signals = signals;
+
+    let mut ev = vec![];
+    if r.market.median > 0 {
+        ev.push(Evidence { fact: format!("میانه قیمت برند: {} تومان", r.market.median), source: "بازار فروشگاه‌های اینترنتی".into(), url: String::new() });
+    }
+    if let Some(first) = offers.iter().find(|o| !o.url.is_empty()) {
+        ev.push(Evidence { fact: format!("یک کالای برند: «{}»", first.title), source: crate::market::platform(&first.platform).map_or("فروشگاه", |p| p.name).into(), url: first.url.clone() });
+    }
+    if r.site.ok {
+        ev.push(Evidence { fact: "سایت رسمی فعال".into(), source: "وب".into(), url: String::new() });
+    }
+    if let Some(f) = r.insta.followers {
+        ev.push(Evidence { fact: format!("اینستاگرام: {f} دنبال‌کننده"), source: "اینستاگرام عمومی".into(), url: format!("https://instagram.com/{}", r.insta.handle) });
+    }
+    r.evidence = ev;
 }
 
 /// Analyses one brand: finds its site and Instagram when missing, reads the live market (its
@@ -685,8 +767,52 @@ pub async fn analyze(
     r.found_site = found_site;
     r.found_instagram = found_instagram;
     enrich(&mut r, &b.name, mine.as_ref(), category.as_ref());
+    // the name was ambiguous (little confirmed) → offer the entities we did find instead of guessing
+    if r.confidence < 55 || r.market.offers == 0 {
+        r.candidates = candidates(&b.name, mine.as_ref());
+    }
     db.brand_report_save(b.id, &r)?;
     Ok(r)
+}
+
+/// Candidate entities for an ambiguous name: the brands / booths / sellers actually found whose
+/// name shares a word with what the user typed (never a renamed guess). Each carries its real link.
+pub fn candidates(name: &str, mine: Option<&Report>) -> Vec<Candidate> {
+    use crate::market::{brand_key, tok_eq, words};
+    let nw = words(name);
+    let Some(m) = mine else { return vec![] };
+    let mut seen = std::collections::HashSet::new();
+    let mut out: Vec<Candidate> = vec![];
+    for o in &m.offers {
+        for (cand, kind, url) in [
+            (o.brand.as_str(), "برند", o.url.as_str()),
+            (o.seller.as_str(), "غرفه / فروشنده", if o.seller_url.is_empty() { o.url.as_str() } else { o.seller_url.as_str() }),
+        ] {
+            let cand = cand.trim();
+            if cand.len() < 2 {
+                continue;
+            }
+            let cw = words(cand);
+            let shared = nw.iter().filter(|w| cw.iter().any(|x| tok_eq(x, w))).count();
+            if shared == 0 {
+                continue; // must be the same name, not a different brand
+            }
+            let key = brand_key(cand);
+            if key.is_empty() || !seen.insert(key) {
+                continue;
+            }
+            out.push(Candidate {
+                name: cand.to_string(),
+                kind: kind.into(),
+                detail: crate::market::platform(&o.platform).map_or(o.platform.clone(), |p| p.name.into()),
+                url: url.to_string(),
+                score: (shared * 100 / nw.len().max(1)) as i64,
+            });
+        }
+    }
+    out.sort_by(|a, b| b.score.cmp(&a.score));
+    out.truncate(3);
+    out
 }
 
 #[cfg(test)]
@@ -706,6 +832,21 @@ mod tests {
         assert_eq!(r.mix.len(), 4);
         assert!(r.competitors.iter().any(|c| c.name == "سبلان"));
         assert!(r.opportunities.iter().any(|x| x.contains("باسلام")), "{:?}", r.opportunities);
+        // trust block is filled and stays apart from the health score
+        assert!(r.confidence > 0 && r.confidence <= 100);
+        assert_eq!(r.signals.len(), 5);
+        assert!(r.evidence.iter().any(|e| e.fact.contains("میانه قیمت")));
+    }
+
+    #[test]
+    fn candidate_resolution() {
+        let o = |t: &str, plat: &str, seller: &str| Offer { title: t.into(), price: 300_000, platform: plat.into(), seller: seller.into(), ..Default::default() };
+        // «شهد آزادی» appears as a booth name and a brand → both become candidates, a stranger does not
+        let m = market("عسل", "", vec![o("عسل شهد آزادی طبیعی", "basalam", "غرفه شهد آزادی"), o("عسل سبلان", "torob", "فروشگاه الف")], 25.0);
+        let c = candidates("شهد آزادی", Some(&m));
+        assert!(!c.is_empty(), "the booth/brand «شهد آزادی» should be a candidate");
+        assert!(c.iter().all(|x| x.name.contains("شهد") || x.name.contains("آزادی")));
+        assert!(!c.iter().any(|x| x.name.contains("سبلان")), "an unrelated seller is not a candidate");
     }
 
     #[test]

@@ -21,6 +21,7 @@ mod brand;
 mod identity;
 mod jobs;
 mod links;
+mod web;
 mod watch;
 mod schedule;
 mod secrets;
@@ -326,6 +327,7 @@ fn main() {
             commands::market_trends,
             commands::market_login,
             commands::market_search,
+            commands::market_rfq,
             commands::market_runs,
             commands::market_get,
             commands::market_delete,

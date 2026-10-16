@@ -683,6 +683,75 @@ pub fn words(s: &str) -> Vec<String> {
         .collect()
 }
 
+/// Small Persian number words → value. Only 0–10 (plus «نیم»/«ربع»): bigger words like «چهل» are
+/// part of product names («عسل چهل گیاه») and must be left alone.
+const NUM_WORDS: &[(&str, f64)] = &[
+    ("صفر", 0.0), ("نیم", 0.5), ("ربع", 0.25), ("یک", 1.0), ("یه", 1.0), ("دو", 2.0), ("سه", 3.0),
+    ("چهار", 4.0), ("پنج", 5.0), ("شش", 6.0), ("شیش", 6.0), ("هفت", 7.0), ("هشت", 8.0), ("نه", 9.0), ("ده", 10.0),
+];
+
+/// Grams in one of a unit, for size equivalence («کیلو»/«kg» = 1000, «گرم»/«g» = 1 …). None = not a size unit.
+fn unit_grams(u: &str) -> Option<f64> {
+    if u.starts_with("کیلو") || u.starts_with("kg") || u.starts_with("لیتر") || u.starts_with("ليتر") || u == "l" || u == "lit" {
+        Some(1000.0)
+    } else if u.starts_with("گرم") || u == "g" || u == "gr" || u == "gram" {
+        Some(1.0)
+    } else if u.starts_with("میلی") || u.starts_with("ml") || u.starts_with("سیسی") || u == "cc" {
+        Some(1.0)
+    } else if u.starts_with("مثقال") {
+        Some(4.6875)
+    } else {
+        None
+    }
+}
+
+fn fmt_num(n: f64) -> String {
+    if (n.fract()).abs() < 1e-9 { format!("{}", n as i64) } else { format!("{n}") }
+}
+
+/// A size written as one token («۱کیلویی», «500گرمی», «1kg») → grams.
+fn attached_size(w: &str) -> Option<f64> {
+    let p = w.find(|c: char| !(c.is_ascii_digit() || c == '.'))?;
+    if p == 0 {
+        return None;
+    }
+    let n: f64 = w[..p].parse().ok()?;
+    let g = n * unit_grams(&w[p..])?;
+    (n > 0.0 && g <= 200_000.0).then_some(g)
+}
+
+/// Canonical tokens for matching: number words → digits, and «<number> <unit>» (or an attached
+/// «۱کیلویی») folded into one `§<grams>g` token, so «یک کیلویی» = «۱ کیلویی» = «1kg» = «1000 گرم».
+pub fn canon_toks(toks: &[String]) -> Vec<String> {
+    let mapped: Vec<String> = toks
+        .iter()
+        .map(|w| NUM_WORDS.iter().find(|(k, _)| k == w).map_or_else(|| w.clone(), |(_, n)| fmt_num(*n)))
+        .collect();
+    let mut out: Vec<String> = vec![];
+    let mut i = 0;
+    while i < mapped.len() {
+        let w = &mapped[i];
+        if let Some(g) = attached_size(w) {
+            out.push(format!("§{}g", g as i64));
+            i += 1;
+            continue;
+        }
+        if let Ok(n) = w.parse::<f64>() {
+            if let Some(ug) = mapped.get(i + 1).and_then(|u| unit_grams(u)) {
+                let g = n * ug;
+                if g > 0.0 && g <= 200_000.0 {
+                    out.push(format!("§{}g", g as i64));
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+        out.push(w.clone());
+        i += 1;
+    }
+    out
+}
+
 fn edit1(a: &str, b: &str) -> bool {
     let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
     if a.len().abs_diff(b.len()) > 1 {
@@ -736,7 +805,9 @@ pub fn matches(title: &str, q: &[String], exact: bool) -> bool {
     if q.is_empty() {
         return true;
     }
-    let t = words(title);
+    let t = canon_toks(&words(title));
+    let q = canon_toks(q);
+    let q = &q;
     let lead = t.iter().take_while(|w| FILLERS.contains(&w.as_str())).count();
     let mut compact: Option<String> = None;
     let mut first = usize::MAX;
@@ -762,6 +833,90 @@ pub fn matches(title: &str, q: &[String], exact: bool) -> bool {
 #[cfg(test)]
 pub fn relevant(title: &str, query: &str) -> bool {
     matches(title, &words(query), true)
+}
+
+/// One alternative of a multi-product query: words that must all appear, and words that must not.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueryGroup {
+    /// The include phrase as the user wrote it (fed to the platforms' search).
+    pub phrase: String,
+    pub include: Vec<String>,
+    pub exclude: Vec<String>,
+}
+
+/// Parses the keyword box into alternatives (searched and matched independently, results merged):
+///   * «|», «+» or «یا» separate alternatives («عسل یک کیلویی + شهد آزادی»);
+///   * a word after «-», «منهای» or «بجز» is excluded («عسل -موم»);
+///   * everything else in an alternative must all appear (AND, as before).
+pub fn parse_query(raw: &str) -> Vec<QueryGroup> {
+    let mut groups = vec![];
+    let unified = raw.replace(['|', '+', '\n'], "٪"); // one separator char not used in queries
+    for alt in unified.split('٪') {
+        // «یا» as a standalone word is also an OR separator
+        for part in split_or_word(alt) {
+            let mut include_raw = vec![];
+            let mut include = vec![];
+            let mut exclude = vec![];
+            let mut neg_next = false;
+            for tok in part.split_whitespace() {
+                let w = tok.trim();
+                if w.is_empty() {
+                    continue;
+                }
+                if matches!(w, "منهای" | "بجز" | "بدون" | "except" | "not") {
+                    neg_next = true;
+                    continue;
+                }
+                let stripped = w.strip_prefix('-').or_else(|| w.strip_prefix('−')).or_else(|| w.strip_prefix('–'));
+                if neg_next || stripped.is_some() {
+                    exclude.extend(words(stripped.unwrap_or(w)));
+                    neg_next = false;
+                } else {
+                    include_raw.push(w.to_string());
+                    include.extend(words(w));
+                }
+            }
+            include = canon_toks(&include);
+            exclude = canon_toks(&exclude);
+            if !include.is_empty() {
+                groups.push(QueryGroup { phrase: include_raw.join(" "), include, exclude });
+            }
+        }
+    }
+    if groups.is_empty() {
+        groups.push(QueryGroup { phrase: raw.trim().into(), include: canon_toks(&words(raw)), exclude: vec![] });
+    }
+    groups
+}
+
+/// Splits an alternative on the standalone word «یا» (but keeps «یاقوت», «دریا» … intact).
+fn split_or_word(s: &str) -> Vec<String> {
+    let mut out = vec![String::new()];
+    for tok in s.split_whitespace() {
+        if tok == "یا" {
+            out.push(String::new());
+        } else {
+            let last = out.last_mut().unwrap();
+            if !last.is_empty() {
+                last.push(' ');
+            }
+            last.push_str(tok);
+        }
+    }
+    out
+}
+
+/// The offer matches the multi-product query: it matches at least one alternative's include words
+/// and contains none of that alternative's excluded words.
+pub fn matches_groups(title: &str, groups: &[QueryGroup], exact: bool) -> bool {
+    if groups.is_empty() {
+        return true;
+    }
+    let t = canon_toks(&words(title));
+    groups.iter().any(|g| {
+        matches(title, &g.include, exact)
+            && !g.exclude.iter().any(|w| t.iter().any(|x| tok_eq(x, w)))
+    })
 }
 
 /// Persian alphabetical order (Unicode order puts پ چ ژ گ after ی).
@@ -1274,6 +1429,10 @@ pub struct Report {
     pub groups: Vec<crate::identity::Group>,
     /// Earlier searches per source: (date, platform name, median).
     pub source_history: Vec<(String, String, i64)>,
+    /// Top web results (at most 3), each read as a structured product page.
+    pub web: Vec<crate::web::WebResult>,
+    /// B2B suppliers found for this product (wholesale / B2B mode).
+    pub suppliers: Vec<crate::web::Supplier>,
 }
 
 pub(crate) fn pct(sorted: &[i64], p: f64) -> i64 {
@@ -1313,8 +1472,9 @@ pub fn analyze_opts(
 ) -> Report {
     let cat = category_for(query);
     let qw = words(query);
+    let groups = parse_query(query);
     let before = offers.len();
-    offers.retain(|o| matches(&o.title, &qw, exact));
+    offers.retain(|o| matches_groups(&o.title, &groups, exact));
     let dropped = before - offers.len();
     // brands: the taxonomy's, every brand a platform named, and brands mined from titles
     let mut known: Vec<String> = cat
@@ -2073,8 +2233,10 @@ pub struct MarketReq {
     /// Neighbourhood / area inside the city (matched against the ad's location text).
     pub district: String,
     pub local_only: bool,
-    /// "seller" (pricing my product) or "buyer" (where to buy) — how the results are presented.
+    /// "seller" (pricing my product), "buyer" (where to buy) or "wholesale" (B2B suppliers).
     pub mode: String,
+    /// Also search the web (top 3 organic results) for this product.
+    pub web: bool,
 }
 
 impl Default for MarketReq {
@@ -2094,6 +2256,7 @@ impl Default for MarketReq {
             district: String::new(),
             local_only: false,
             mode: "seller".into(),
+            web: false,
         }
     }
 }
@@ -2118,61 +2281,78 @@ pub async fn search(
         .iter()
         .filter(|p| req.platforms.is_empty() || req.platforms.iter().any(|x| x == p.id))
         .collect();
-    let full_query = if req.brand.trim().is_empty() {
-        query.to_string()
-    } else {
-        format!("{query} {}", req.brand.trim())
-    };
-    let qw = words(query); // base query words for filtering logic
-    let mut all = vec![];
+    // one or more products / alternatives to search («عسل یک کیلویی + شهد آزادی», «عسل -موم»)
+    let groups = parse_query(query);
+    let brand = req.brand.trim();
+    let search_phrase = |g: &QueryGroup| if brand.is_empty() { g.phrase.clone() } else { format!("{} {brand}", g.phrase) };
+    let mut all: Vec<Offer> = vec![];
     let mut status = vec![];
     let mut eng: Option<scanner::Engine> = None;
     for (i, p) in chosen.iter().enumerate() {
         if token.is_cancelled() {
             break;
         }
-        scanner::status(
-            emit,
-            format!(
-                "جستجوی «{full_query}» در {} ({} از {})",
-                p.name,
-                i + 1,
-                chosen.len()
-            ),
-        );
-        let r = tokio::select! {
-            r = collect_one(db, s, profile, p, req, &full_query, &mut eng, token, emit) => r,
-            _ = token.cancelled() => Ok(vec![]),
-        };
-        match r {
-            Ok(mut found) => {
-                for o in &mut found {
-                    verify_links(o);
-                }
-                let n = found
-                    .iter()
-                    .filter(|o| matches(&o.title, &qw, req.exact))
-                    .count();
-                scanner::log(
-                    emit,
-                    if n > 0 { "success" } else { "warning" },
-                    format!("{}: {} پیشنهاد مرتبط از {} نتیجه", p.name, n, found.len()),
-                );
-                status.push((p.id.to_string(), n, String::new()));
-                all.extend(found);
+        let mut found: Vec<Offer> = vec![];
+        let mut err: Option<String> = None;
+        for g in &groups {
+            if token.is_cancelled() {
+                break;
             }
-            Err(e) => {
-                scanner::log(emit, "warning", format!("{}: {e}", p.name));
-                status.push((p.id.to_string(), 0, e));
+            let phrase = search_phrase(g);
+            scanner::status(emit, format!("جستجوی «{phrase}» در {} ({} از {})", p.name, i + 1, chosen.len()));
+            let r = tokio::select! {
+                r = collect_one(db, s, profile, p, req, &phrase, &mut eng, token, emit) => r,
+                _ = token.cancelled() => Ok(vec![]),
+            };
+            match r {
+                Ok(mut got) => found.append(&mut got),
+                Err(e) => err = Some(e),
             }
         }
+        // dedup the same product found by two alternatives
+        let mut seen = std::collections::HashSet::new();
+        found.retain(|o| seen.insert((o.title.clone(), o.seller.clone(), o.price)));
+        for o in &mut found {
+            verify_links(o);
+        }
+        let relevant = found.iter().filter(|o| matches_groups(&o.title, &groups, req.exact)).count();
+        match (relevant, &err) {
+            (0, Some(e)) => {
+                scanner::log(emit, "warning", format!("{}: {e}", p.name));
+                status.push((p.id.to_string(), 0usize, e.clone()));
+            }
+            _ => {
+                scanner::log(
+                    emit,
+                    if relevant > 0 { "success" } else { "warning" },
+                    format!("{}: {relevant} پیشنهاد مرتبط از {} نتیجه", p.name, found.len()),
+                );
+                status.push((p.id.to_string(), relevant, String::new()));
+            }
+        }
+        all.extend(found);
         emit(ScanEvent::Progress {
-            keyword: full_query.clone(),
+            keyword: query.to_string(),
             collected: all.len() as i64,
             checked: (i + 1) as i64,
             found: all.len() as i64,
             target: chosen.len() as i64,
         });
+    }
+    // web sources (top 3) and B2B suppliers, while the browser is still open
+    let wholesale = req.mode == "wholesale";
+    let (mut web, mut suppliers) = (vec![], vec![]);
+    if (req.web || wholesale) && !token.is_cancelled() {
+        if eng.is_none() {
+            eng = scanner::launch(s, profile, s.headless, 0).await.ok();
+        }
+        if let Some(e) = eng.as_ref() {
+            scanner::status(emit, "جستجوی وب و تأمین‌کنندگان…");
+            web = crate::web::results(&e.list, query, 3, token).await;
+            if wholesale {
+                suppliers = crate::web::suppliers(&e.list, query, token).await;
+            }
+        }
     }
     scanner::shut(eng).await;
     // the user's price range and region, before any statistics
@@ -2207,7 +2387,9 @@ pub async fn search(
     );
     report.platforms = status;
     report.out_of_range = out_of_range;
-    if report.offers.is_empty() {
+    report.web = web;
+    report.suppliers = suppliers;
+    if report.offers.is_empty() && report.web.is_empty() && report.suppliers.is_empty() {
         let hint = if out_of_range > 0 {
             format!(" {out_of_range} قیمت خارج از محدوده‌ای بود که دادید؛ محدوده را بازتر کنید.")
         } else {
@@ -2380,6 +2562,44 @@ mod tests {
         let card =
             json!({"title": "زعفران سرگل یک مثقالی", "price": "۸۹۰٬۰۰۰", "url": "https://emalls.ir/x"});
         assert_eq!(offers_in(&card, "emalls", false)[0].price, 890_000);
+    }
+
+    #[test]
+    fn multi_query_and_exclude() {
+        use super::{matches_groups, parse_query};
+        let g = parse_query("عسل یک کیلویی + شهد آزادی");
+        assert_eq!(g.len(), 2);
+        assert!(matches_groups("عسل خوانسار 1 کیلویی", &g, true));
+        assert!(matches_groups("عسل شهد آزادی طبیعی", &g, false));
+        // «یا» as OR
+        let or = parse_query("عسل یا شهد آزادی");
+        assert_eq!(or.len(), 2);
+        // exclude: «عسل -موم» drops honeycomb offers
+        let ex = parse_query("عسل -موم");
+        assert_eq!(ex.len(), 1);
+        assert!(matches_groups("عسل طبیعی خوانسار", &ex, true));
+        assert!(!matches_groups("عسل موم دار", &ex, false), "excluded word «موم»");
+        // «منهای» keyword
+        let ex2 = parse_query("عسل منهای موم");
+        assert!(!matches_groups("عسل با موم", &ex2, false));
+        // a plain query is one group
+        assert_eq!(parse_query("عسل خوانسار").len(), 1);
+    }
+
+    #[test]
+    fn number_and_size_equivalence() {
+        use super::{matches, words};
+        // «یک کیلویی» = «۱ کیلویی» = «1kg» = «1000 گرم» all match each other
+        for q in ["عسل یک کیلویی", "عسل ۱ کیلویی", "عسل 1 کیلویی", "عسل 1kg", "عسل ۱۰۰۰ گرم", "عسل یک کیلو"] {
+            for title in ["عسل خوانسار 1 کیلویی", "عسل طبیعی یک کیلو", "عسل ۱۰۰۰ گرمی", "خرید عسل 1kg اصل"] {
+                assert!(matches(title, &words(q), true), "«{title}» should match «{q}»");
+            }
+        }
+        // a different size does not match a stated one
+        assert!(!matches("عسل خوانسار ۵۰۰ گرمی", &words("عسل 1 کیلویی"), true));
+        // «چهل» stays part of the product name, never read as the number 40
+        assert!(matches("عسل چهل گیاه خوانسار", &words("عسل چهل گیاه"), true));
+        assert_eq!(super::canon_toks(&words("یک کیلویی")), super::canon_toks(&words("۱۰۰۰ گرم")));
     }
 
     #[test]

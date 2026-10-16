@@ -378,6 +378,15 @@ pub async fn market_search(app: AppHandle, state: State<'_, AppState>, req: crat
     run_job(Some(&app), &state, job, work, |r| Ok(format!("{} پیشنهاد معتبر از {} منبع", r.offers.len(), r.channels.len()))).await
 }
 
+/// Builds a ready-to-copy price-enquiry (RFQ) message; nothing is sent.
+#[tauri::command]
+pub async fn market_rfq(req: crate::web::Rfq) -> Res<String> {
+    if req.product.trim().is_empty() {
+        return Err("نام کالا را برای استعلام بنویسید.".into());
+    }
+    Ok(crate::web::rfq_text(&req))
+}
+
 #[tauri::command]
 pub async fn market_runs(state: State<'_, AppState>) -> Res<Vec<crate::market::RunRow>> {
     state.db.market_runs(100)
