@@ -2,7 +2,8 @@
 //! Tauri converts snake_case argument names to camelCase for JS (`list_id` → `listId`).
 use crate::db::{err, Account, Activity, Campaign, Contact, Dashboard, Db, Facets, Filter, ListInfo, Place, Res, Run, Template, KINDS};
 use crate::outreach::CampaignReq;
-use crate::scanner::{ScanEvent, ScanRequest, Summary};
+use crate::jobs::{Job, Jobs};
+use crate::scanner::{Emit, ScanEvent, ScanRequest, Summary};
 use crate::{admin, assist, channels, cloud, export, license, logic, outreach, scanner, secrets, sources};
 use futures::FutureExt;
 use serde::Serialize;
@@ -17,34 +18,55 @@ use tokio_util::sync::CancellationToken;
 pub struct AppState {
     pub db: Db,
     pub dir: PathBuf,
-    pub job: Mutex<Option<(CancellationToken, &'static str)>>, // one scan or campaign at a time
-    pub quit: AtomicBool,                                      // window closed mid-job: exit once it has shut down
+    /// Every running (and the last few finished) operations — see jobs.rs.
+    pub jobs: Jobs,
+    pub quit: AtomicBool,                                      // window closed mid-job: exit once every job has shut down
     pub migrated: Mutex<Option<Value>>,                        // one-time notice after importing SellerMap v3
 }
 
-/// Clears the job slot even if the job panics or its future is dropped.
-pub struct Busy<'a>(&'a Mutex<Option<(CancellationToken, &'static str)>>);
-impl Drop for Busy<'_> {
-    fn drop(&mut self) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = None;
+/// Kept for callers that only need to know a job could not start (the scheduler retries later).
+pub const BUSY: &str = crate::jobs::BUSY_SAME;
+
+/// A job's events go both to its live state in the operation manager and to `emit` (the page).
+pub fn tee<'a>(jobs: &'a Jobs, id: u64, emit: Emit<'a>) -> impl Fn(ScanEvent) + Send + Sync + 'a {
+    move |e: ScanEvent| {
+        jobs.record(id, &e);
+        emit(e);
     }
 }
 
-/// Claims the job slot: one scan or campaign at a time.
-pub const BUSY: &str = "یک عملیات دیگر در حال اجراست؛ ابتدا آن را متوقف کنید.";
-
-pub fn begin<'a>(state: &'a AppState, kind: &'static str) -> Res<(CancellationToken, Busy<'a>)> {
-    let mut slot = state.job.lock().unwrap_or_else(|e| e.into_inner());
-    if slot.is_some() {
-        return Err(BUSY.into());
+/// Runs `work` as `job`: `scanner::launch` then knows which job holds the browser, a panic ends
+/// the job as failed instead of the app, and the job is closed with its outcome. When the window
+/// was closed meanwhile, the app quits once the last job has shut its browser down.
+pub async fn run_job<T>(
+    app: Option<&AppHandle>,
+    state: &AppState,
+    job: Job,
+    work: impl std::future::Future<Output = Res<T>>,
+    outcome: impl Fn(&T) -> Result<String, String>,
+) -> Res<T> {
+    let res = AssertUnwindSafe(scanner::JOB_ID.scope(job.id, work)).catch_unwind().await.unwrap_or_else(|_| {
+        crate::log_line("PANIC", "job panicked");
+        Err("خطای داخلی رخ داد؛ داده‌های ذخیره‌شده حفظ شده‌اند.".into())
+    });
+    match res.as_ref().map(&outcome) {
+        Ok(Ok(msg)) => job.finish(None, &msg),
+        Ok(Err(e)) | Err(e) => job.finish(Some(&e.to_string()), ""),
     }
-    let token = CancellationToken::new();
-    *slot = Some((token.clone(), kind));
-    Ok((token, Busy(&state.job)))
+    if state.quit.load(Relaxed) && state.jobs.running().is_empty() {
+        if let Some(app) = app {
+            app.exit(0);
+        }
+    }
+    res
 }
 
-fn busy(state: &AppState) -> bool {
-    state.job.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+fn summary_outcome(s: &Summary) -> Result<String, String> {
+    if s.error {
+        Err(s.message.clone())
+    } else {
+        Ok(s.message.clone())
+    }
 }
 
 fn issuer_only() -> Res<()> {
@@ -144,30 +166,28 @@ pub async fn license_import_key(state: State<'_, AppState>, seed: String) -> Res
 
 // ---------------- jobs ----------------
 
+/// Stops one operation (`id`) or, without an id, every running one.
 #[tauri::command]
-pub async fn job_stop(state: State<'_, AppState>) -> Res<bool> {
-    let slot = state.job.lock().unwrap_or_else(|e| e.into_inner());
-    Ok(slot.as_ref().map(|(t, _)| t.cancel()).is_some())
+pub async fn job_stop(state: State<'_, AppState>, id: Option<u64>) -> Res<bool> {
+    Ok(state.jobs.stop(id))
+}
+
+/// The kind of the first running operation (kept for older pages).
+#[tauri::command]
+pub async fn job_current(state: State<'_, AppState>) -> Res<Option<String>> {
+    Ok(state.jobs.running().into_iter().next().map(|j| j.kind))
+}
+
+/// Running operations first, then the last finished ones (the «عملیات» panel).
+#[tauri::command]
+pub async fn jobs_list(state: State<'_, AppState>) -> Res<Vec<crate::jobs::JobInfo>> {
+    Ok(state.jobs.list())
 }
 
 #[tauri::command]
-pub async fn job_current(state: State<'_, AppState>) -> Res<Option<&'static str>> {
-    Ok(state.job.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|(_, k)| *k))
-}
-
-/// After a job: if the window was closed meanwhile, quit now that the browser / connections are shut.
-fn finish(app: &AppHandle, state: &AppState, res: Result<Res<Summary>, Box<dyn std::any::Any + Send>>) -> Res<Summary> {
-    if state.quit.load(Relaxed) {
-        app.exit(0);
-    }
-    unwind(res)
-}
-
-fn unwind(res: Result<Res<Summary>, Box<dyn std::any::Any + Send>>) -> Res<Summary> {
-    res.unwrap_or_else(|_| {
-        crate::log_line("PANIC", "job panicked");
-        Err("خطای داخلی رخ داد؛ داده‌های ذخیره‌شده حفظ شده‌اند.".into())
-    })
+pub async fn jobs_clear(state: State<'_, AppState>) -> Res<()> {
+    state.jobs.clear_finished();
+    Ok(())
 }
 
 fn emitter(on_event: Channel<ScanEvent>) -> impl Fn(ScanEvent) + Send + Sync {
@@ -177,15 +197,11 @@ fn emitter(on_event: Channel<ScanEvent>) -> impl Fn(ScanEvent) + Send + Sync {
 }
 
 async fn scan(app: AppHandle, state: State<'_, AppState>, req: ScanRequest, on_event: Channel<ScanEvent>, resumed: Option<i64>) -> Res<Summary> {
-    let res = run_scan(&state, req, &emitter(on_event), resumed).await;
-    if state.quit.load(Relaxed) {
-        app.exit(0); // the window was closed during the job
-    }
-    res
+    run_scan(Some(&app), &state, req, &emitter(on_event), resumed, false).await
 }
 
 /// One extraction job (one or several sources). Used by the «استخراج» page and by the scheduler.
-pub async fn run_scan(state: &AppState, req: ScanRequest, emit: &(dyn Fn(ScanEvent) + Send + Sync), resumed: Option<i64>) -> Res<Summary> {
+pub async fn run_scan(app: Option<&AppHandle>, state: &AppState, req: ScanRequest, emit: Emit<'_>, resumed: Option<i64>, scheduled: bool) -> Res<Summary> {
     license::ensure(&state.db)?;
     let st = license::status(&state.db);
     let wanted = sources::requested(&req);
@@ -205,7 +221,10 @@ pub async fn run_scan(state: &AppState, req: ScanRequest, emit: &(dyn Fn(ScanEve
         return Err("بانک مقصد را انتخاب کنید.".into());
     }
     cloud::precheck(&state.db, "scan")?;
-    let (token, _busy) = begin(state, "scan")?;
+    let job = state.jobs.start("scan", &format!("استخراج «{}»", req.keywords.join("، ")), scheduled)?;
+    let (token, id) = (job.token.clone(), job.id);
+    let emit = &tee(&state.jobs, id, emit);
+    let work = async {
     if let Some(id) = resumed {
         state.db.run_resumed(id);
     }
@@ -239,6 +258,15 @@ pub async fn run_scan(state: &AppState, req: ScanRequest, emit: &(dyn Fn(ScanEve
         }
     }
     unwind(res)
+    };
+    run_job(app, state, job, work, summary_outcome).await
+}
+
+fn unwind(res: Result<Res<Summary>, Box<dyn std::any::Any + Send>>) -> Res<Summary> {
+    res.unwrap_or_else(|_| {
+        crate::log_line("PANIC", "job panicked");
+        Err("خطای داخلی رخ داد؛ داده‌های ذخیره‌شده حفظ شده‌اند.".into())
+    })
 }
 
 #[tauri::command]
@@ -268,19 +296,22 @@ pub async fn campaign_run(app: AppHandle, state: State<'_, AppState>, req: Campa
     license::ensure(&state.db)?;
     cloud::precheck(&state.db, "send")?;
     let account = channels::load(&state.db, &req.account_id)?;
-    let (token, _busy) = begin(&state, "campaign")?;
-    let emit = emitter(on_event);
-    let res = AssertUnwindSafe(outreach::run_campaign(&state.db, &req, account, &token, &emit))
-        .catch_unwind()
-        .await;
-    // counted after the run (only real sends); the server fills the quota to its cap on overshoot,
-    // so at most one campaign can pass the cap and the next one is refused by precheck
-    if let Ok(Ok(sum)) = &res {
-        if let Err(e) = cloud::consume(&state.db, "send", sum.found).await {
-            crate::log_line("WARN", &format!("send quota: {e}"));
+    let job = state.jobs.start("campaign", "کمپین ارسال", false)?;
+    let token = job.token.clone();
+    let page = emitter(on_event);
+    let emit = tee(&state.jobs, job.id, &page);
+    let work = async {
+        let res = outreach::run_campaign(&state.db, &req, account, &token, &emit).await;
+        // counted after the run (only real sends); the server fills the quota to its cap on overshoot,
+        // so at most one campaign can pass the cap and the next one is refused by precheck
+        if let Ok(sum) = &res {
+            if let Err(e) = cloud::consume(&state.db, "send", sum.found).await {
+                crate::log_line("WARN", &format!("send quota: {e}"));
+            }
         }
-    }
-    finish(&app, &state, res)
+        res
+    };
+    run_job(Some(&app), &state, job, work, summary_outcome).await
 }
 
 /// Preview of a template for one place (what the recipient will read).
@@ -336,12 +367,15 @@ pub async fn assist_session(app: AppHandle, state: State<'_, AppState>, messenge
 
 /// Collects prices from the chosen platforms (browser only when an API does not answer).
 #[tauri::command]
-pub async fn market_search(state: State<'_, AppState>, req: crate::market::MarketReq, on_event: Channel<ScanEvent>) -> Res<crate::market::Report> {
+pub async fn market_search(app: AppHandle, state: State<'_, AppState>, req: crate::market::MarketReq, on_event: Channel<ScanEvent>) -> Res<crate::market::Report> {
     license::ensure(&state.db)?;
-    let (token, _busy) = begin(&state, "market")?;
-    let s: scanner::Settings = serde_json::from_value(Value::Object(settings(&state.db))).unwrap_or_default();
-    let profile = state.dir.join("browser-profile");
-    crate::market::search(&state.db, &s, &profile, &req, &token, &emitter(on_event)).await
+    let job = state.jobs.start("market", &format!("تحلیل محصول «{}»", req.query.trim()), false)?;
+    let (s, profile) = market_settings(&state);
+    let token = job.token.clone();
+    let page = emitter(on_event);
+    let emit = tee(&state.jobs, job.id, &page);
+    let work = crate::market::search(&state.db, &s, &profile, &req, &token, &emit);
+    run_job(Some(&app), &state, job, work, |r| Ok(format!("{} پیشنهاد معتبر از {} منبع", r.offers.len(), r.channels.len()))).await
 }
 
 #[tauri::command]
@@ -377,13 +411,16 @@ pub async fn brand_delete(state: State<'_, AppState>, id: i64) -> Res<()> {
 }
 
 #[tauri::command]
-pub async fn brand_analyze(state: State<'_, AppState>, id: i64, on_event: Channel<ScanEvent>) -> Res<crate::brand::BrandReport> {
+pub async fn brand_analyze(app: AppHandle, state: State<'_, AppState>, id: i64, on_event: Channel<ScanEvent>) -> Res<crate::brand::BrandReport> {
     license::ensure(&state.db)?;
     let b = state.db.brands()?.into_iter().find(|b| b.id == id).ok_or("برند پیدا نشد.")?;
-    let (token, _busy) = begin(&state, "market")?;
-    let s: scanner::Settings = serde_json::from_value(Value::Object(settings(&state.db))).unwrap_or_default();
-    let profile = state.dir.join("browser-profile");
-    crate::brand::analyze(&state.db, &s, &profile, &b, &token, &emitter(on_event)).await
+    let job = state.jobs.start("brand", &format!("تحلیل برند «{}»", b.name.trim()), false)?;
+    let (s, profile) = market_settings(&state);
+    let token = job.token.clone();
+    let page = emitter(on_event);
+    let emit = tee(&state.jobs, job.id, &page);
+    let work = crate::brand::analyze(&state.db, &s, &profile, &b, &token, &emit);
+    run_job(Some(&app), &state, job, work, |r| Ok(format!("اعتماد داده {}٪", r.confidence))).await
 }
 
 #[tauri::command]
@@ -405,9 +442,12 @@ pub async fn market_trends(state: State<'_, AppState>) -> Res<Vec<crate::market:
 /// in the browser profile the product searches use. Returns when the window is closed.
 #[tauri::command]
 pub async fn market_login(state: State<'_, AppState>, platform: String) -> Res<()> {
-    let (_token, _busy) = begin(&state, "market")?;
-    let s: scanner::Settings = serde_json::from_value(Value::Object(settings(&state.db))).unwrap_or_default();
-    crate::market::login(&s, &state.dir.join("browser-profile"), &platform).await
+    let name = crate::market::platform(&platform).map_or(platform.as_str(), |p| p.name);
+    let job = state.jobs.start("login", &format!("ورود به {name}"), false)?;
+    let (s, profile) = market_settings(&state);
+    let token = job.token.clone();
+    let work = crate::market::login(&s, &profile, &platform, &token);
+    run_job(None, &state, job, work, |_| Ok("پنجره ورود بسته شد؛ نشست ذخیره شد.".into())).await
 }
 
 // ---------------- daily watchlist & the seller's catalogue ----------------
@@ -443,15 +483,18 @@ pub async fn watch_time(state: State<'_, AppState>, at: Option<String>) -> Res<S
 /// Re-analyses watched products now (all enabled ones when `ids` is empty).
 #[tauri::command]
 pub async fn watch_run(state: State<'_, AppState>, ids: Vec<i64>, on_event: Channel<ScanEvent>) -> Res<Summary> {
-    run_watch(&state, &ids, &emitter(on_event)).await
+    run_watch(&state, &ids, &emitter(on_event), false).await
 }
 
 /// Also used by the scheduler for the daily check.
-pub async fn run_watch(state: &AppState, ids: &[i64], emit: &(dyn Fn(ScanEvent) + Send + Sync)) -> Res<Summary> {
+pub async fn run_watch(state: &AppState, ids: &[i64], emit: Emit<'_>, scheduled: bool) -> Res<Summary> {
     license::ensure(&state.db)?;
-    let (token, _busy) = begin(state, "watch")?;
+    let job = state.jobs.start("watch", "پایش روزانه قیمت", scheduled)?;
     let (s, profile) = market_settings(state);
-    crate::watch::run(&state.db, &s, &profile, ids, &token, emit).await
+    let token = job.token.clone();
+    let emit = tee(&state.jobs, job.id, emit);
+    let work = crate::watch::run(&state.db, &s, &profile, ids, &token, &emit);
+    run_job(None, state, job, work, summary_outcome).await
 }
 
 #[tauri::command]
@@ -477,9 +520,13 @@ pub async fn catalog_delete(state: State<'_, AppState>, ids: Vec<i64>) -> Res<()
 #[tauri::command]
 pub async fn catalog_check(state: State<'_, AppState>, ids: Vec<i64>, platforms: Vec<String>, margin: f64, on_event: Channel<ScanEvent>) -> Res<Summary> {
     license::ensure(&state.db)?;
-    let (token, _busy) = begin(&state, "catalog")?;
+    let job = state.jobs.start("catalog", "مقایسه کالاهای من با بازار", false)?;
     let (s, profile) = market_settings(&state);
-    crate::watch::check(&state.db, &s, &profile, &ids, &platforms, margin, &token, &emitter(on_event)).await
+    let token = job.token.clone();
+    let page = emitter(on_event);
+    let emit = tee(&state.jobs, job.id, &page);
+    let work = crate::watch::check(&state.db, &s, &profile, &ids, &platforms, margin, &token, &emit);
+    run_job(None, &state, job, work, summary_outcome).await
 }
 
 /// The business photo for the card, as a data: URL (the UI may only show local images).
@@ -587,7 +634,7 @@ pub async fn list_update(state: State<'_, AppState>, id: i64, name: String, colo
 
 #[tauri::command]
 pub async fn list_delete(state: State<'_, AppState>, id: i64) -> Res<()> {
-    if busy(&state) {
+    if !state.jobs.running().is_empty() {
         return Err("ابتدا عملیات در حال اجرا را متوقف کنید.".into());
     }
     let name = state.db.list_name(id);
@@ -902,7 +949,7 @@ pub async fn backup_now(state: State<'_, AppState>) -> Res<String> {
 
 #[tauri::command]
 pub async fn backup_restore(state: State<'_, AppState>, name: String) -> Res<()> {
-    if busy(&state) {
+    if !state.jobs.running().is_empty() {
         return Err("ابتدا عملیات در حال اجرا را متوقف کنید.".into());
     }
     if name.contains(['/', '\\', ':']) || !name.ends_with(".db") {

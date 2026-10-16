@@ -19,6 +19,8 @@ mod scanner;
 mod market;
 mod brand;
 mod identity;
+mod jobs;
+mod links;
 mod watch;
 mod schedule;
 mod secrets;
@@ -165,9 +167,14 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(AppState {
         db,
         dir,
-        job: Mutex::new(None),
+        jobs: jobs::Jobs::default(),
         quit: AtomicBool::new(false),
         migrated: Mutex::new(migrated),
+    });
+    // every change of an operation goes to the window («عملیات» panel)
+    let h = app.handle().clone();
+    app.state::<AppState>().jobs.on_change(move |job| {
+        let _ = tauri::Emitter::emit(&h, "job-update", job);
     });
 
     if license::ISSUER {
@@ -281,10 +288,8 @@ fn main() {
                     let _ = window.hide();
                     return;
                 }
-                let slot = st.job.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some((t, _)) = slot.as_ref() {
-                    // stop the job first (it closes the browser); the job quits the app when done
-                    t.cancel();
+                if st.jobs.stop(None) {
+                    // stop the jobs first (they close the browser); the last one quits the app when done
                     st.quit.store(true, Relaxed);
                     api.prevent_close();
                 } else {
@@ -340,6 +345,8 @@ fn main() {
             commands::export_data,
             commands::import_data,
             commands::job_current,
+            commands::jobs_list,
+            commands::jobs_clear,
             commands::lists,
             commands::list_create,
             commands::list_update,

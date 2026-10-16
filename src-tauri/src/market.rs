@@ -213,13 +213,19 @@ pub fn city_slug(province: &str, city: &str) -> &'static str {
         .unwrap_or("iran")
 }
 
-/// Site-relative links ("/p/…") made absolute for the platform they came from.
-fn absolute(url: &str, p: &Platform) -> String {
-    if !url.starts_with('/') || url.starts_with("//") {
-        return url.to_string();
+/// Site-relative links made absolute and cleaned; a link that is not this product's own page
+/// (home, search, photo, another site) is dropped instead of being shown as the product's link.
+pub fn verify_links(o: &mut Offer) {
+    use crate::links::{absolute, canonical, check, kind, Kind};
+    o.url = canonical(&absolute(&o.platform, &o.url));
+    if matches!(kind(&o.platform, &o.url), Kind::Home | Kind::Search | Kind::Image) {
+        o.url.clear();
     }
-    let origin: String = p.page.splitn(4, '/').take(3).collect::<Vec<_>>().join("/");
-    format!("{origin}{url}")
+    o.link = check(&o.platform, &o.url).to_string();
+    o.seller_url = canonical(&absolute(&o.platform, &o.seller_url));
+    if !o.seller_url.is_empty() && kind(&o.platform, &o.seller_url) != Kind::Seller {
+        o.seller_url.clear();
+    }
 }
 
 pub fn platform(id: &str) -> Option<&'static Platform> {
@@ -246,6 +252,10 @@ pub struct Offer {
     pub sales: i64,              // sold count, when the platform shows it
     pub updated: String,         // last price/listing update (ISO date-time), when known
     pub location: String,        // seller / ad city, when known
+    /// This seller's / booth's own page on the platform, when the platform's data names it.
+    pub seller_url: String,
+    /// "exact" = `url` is proven to be this product's page on the platform; "unverified"; "" = no link.
+    pub link: String,
 }
 
 const TITLE_KEYS: &[&str] = &[
@@ -560,14 +570,11 @@ fn walk(v: &Value, platform: &str, rial: bool, out: &mut Vec<Offer>, depth: usiz
                     let rating = find_num(o, RATING_KEYS, 2)
                         .map(|r| if r > 5.0 { r / 20.0 } else { r })
                         .filter(|r| *r > 0.0 && *r <= 5.0);
-                    let mut url = find(o, URL_KEYS, 1)
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_string();
-                    if url.is_empty() && platform == "divar" {
-                        if let Some(tok) = o.get("token").and_then(Value::as_str) {
-                            url = format!("https://divar.ir/v/{tok}");
-                        }
+                    // the product's own page (built from the platform's ids), else a link field
+                    // of this object; never a nested photo / vendor link
+                    let (mut url, seller_url) = crate::links::from_json(platform, o);
+                    if url.is_empty() {
+                        url = URL_KEYS.iter().find_map(|k| o.get(*k).and_then(Value::as_str)).unwrap_or("").to_string();
                     }
                     out.push(Offer {
                         platform: platform.into(),
@@ -595,6 +602,7 @@ fn walk(v: &Value, platform: &str, rial: bool, out: &mut Vec<Offer>, depth: usiz
                         sales: find_num(o, SALES_KEYS, 1).unwrap_or(0.0) as i64,
                         updated: find(o, DATE_KEYS, 1).and_then(date_of).unwrap_or_default(),
                         location: find(o, LOCATION_KEYS, 1).and_then(text).unwrap_or_default(),
+                        seller_url,
                         ..Default::default()
                     });
                     return; // the product object itself: don't count its nested variants twice
@@ -1716,14 +1724,14 @@ for (const el of document.querySelectorAll('a[href]')) {
 out.push({ cards });
 const body = document.body ? document.body.innerText.slice(0, 3000) : '';
 return {
-  blocked: /captcha|challenge|verify you are human|ربات نیستم|تأیید هویت/i.test(body),
+  blocked: /captcha|challenge|verify you are human|ربات نیستم|ربات هستید|فلش پازل|تأیید هویت|arcaptcha/i.test(body),
   login: /\/(login|signin|sign-in|auth|session)(\/|$|\?)/i.test(location.pathname + location.search),
   cards: cards.length,
   data: out,
 };
 "#;
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Debug, PartialEq)]
 #[serde(default)]
 struct PageData {
     blocked: bool,
@@ -1766,11 +1774,23 @@ async fn scroll_for(page: &chromiumoxide::Page, want: usize, token: &Cancellatio
     d
 }
 
-const VERIFY_WAIT: &str = "یک پنجره مرورگر باز شد: «{p}» تأیید «ربات نیستم» یا ورود به حساب خواست. آن را انجام دهید یا دکمه «رد کردن و ادامه» را بزنید.";
+const VERIFY_WAIT: &str = "یک پنجره مرورگر باز شد: «{p}» تأیید «ربات نیستم» یا ورود به حساب خواست. آن را در همان پنجره انجام دهید؛ جستجو خودکار ادامه پیدا می‌کند. برای رد کردن این منبع، پنجره را ببندید یا «رد کردن و ادامه» را بزنید.";
 
-/// The page needs the user (captcha or sign-in): a visible window on the same profile.
-/// Never gets stuck on 0-result queries: closing the browser window or clicking «رد کردن و ادامه»
-/// immediately continues to the next platform without error.
+/// How a source that needed the user ended (shown per source in the report).
+#[derive(Debug, PartialEq)]
+enum Attended {
+    /// The check was passed and the results page was read.
+    Read(PageData),
+    /// The user skipped the source (closed the window / «رد کردن و ادامه») or Stop was pressed.
+    Skipped,
+    /// Nobody passed the check in time.
+    TimedOut,
+}
+
+/// The page needs the user (captcha or sign-in): a visible window on the same profile. The caller
+/// must have closed its own headless browser first (one profile = one browser).
+/// Never gets stuck: closing the window, «رد کردن و ادامه», Stop or the time limit (also while a
+/// sign-in page is shown) all end the wait and the search goes on with the next platform.
 async fn attended(
     s: &Settings,
     profile: &Path,
@@ -1779,43 +1799,42 @@ async fn attended(
     want: usize,
     token: &CancellationToken,
     emit: Emit<'_>,
-) -> Result<PageData, String> {
+) -> Result<Attended, String> {
+    scanner::clear_wait_skip();
     emit(ScanEvent::Captcha {
         message: VERIFY_WAIT.replace("{p}", p.name),
     });
     let mut eng = scanner::launch(s, profile, false, 0).await?;
     scanner::goto(&eng.list, url).await;
-    let deadline = std::time::Instant::now() + Duration::from_secs(180);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5 * 60);
     let mut reloaded_once = false;
     let result = loop {
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_millis(1500)) => {}
-            _ = token.cancelled() => break Ok(PageData::default()),
+            _ = token.cancelled() => break Attended::Skipped,
         }
-        // User closed the browser window manually -> treat as "skip this platform and continue", never fail
-        if eng.proc.exited() || !eng.alive.load(std::sync::atomic::Ordering::Relaxed) {
-            break Ok(PageData::default());
-        }
-        let d: PageData = scanner::js(&eng.list, PAGE_JS).await.unwrap_or_default();
-        if d.login {
-            continue;
-        }
-        if !d.blocked {
-            if d.cards == 0 && !reloaded_once {
-                reloaded_once = true;
-                scanner::goto(&eng.list, url).await;
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                continue;
-            }
-            break Ok(scroll_for(&eng.list, want, token).await);
+        if scanner::take_wait_skip() || eng.proc.exited() || !eng.alive.load(std::sync::atomic::Ordering::Relaxed) {
+            break Attended::Skipped;
         }
         if std::time::Instant::now() > deadline {
-            break Ok(PageData::default());
+            break Attended::TimedOut;
         }
+        let d: PageData = scanner::js(&eng.list, PAGE_JS).await.unwrap_or_default();
+        if d.blocked || d.login {
+            continue;
+        }
+        if d.cards == 0 && !reloaded_once {
+            // the check was passed on another page (e.g. the home page): open the search again
+            reloaded_once = true;
+            scanner::goto(&eng.list, url).await;
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            continue;
+        }
+        break Attended::Read(scroll_for(&eng.list, want, token).await);
     };
     scanner::shut(Some(eng)).await;
     scanner::status(emit, format!("ادامه جستجو پس از {}…", p.name));
-    result
+    Ok(result)
 }
 
 #[allow(clippy::too_many_arguments)] // one call site; a context struct would only rename these
@@ -1936,11 +1955,20 @@ async fn collect_one(
     );
     scanner::goto(&e.list, &url).await;
     tokio::time::sleep(Duration::from_millis(2500)).await;
-    let mut d = scroll_for(&e.list, want, token).await;
-    if d.blocked || d.login {
-        d = attended(s, profile, p, &url, want, token, emit).await?;
+    let d = scroll_for(&e.list, want, token).await;
+    if !(d.blocked || d.login) {
+        return Ok(page_offers(&d, p));
     }
-    Ok(page_offers(&d, p))
+    // the visible window needs the profile this headless browser holds: close it first (the next
+    // platform starts a fresh one)
+    scanner::shut(eng.take()).await;
+    let why = if d.login { "ورود به حساب لازم است" } else { "تأیید «ربات نیستم» لازم است" };
+    match attended(s, profile, p, &url, want, token, emit).await? {
+        Attended::Read(d) => Ok(page_offers(&d, p)),
+        Attended::Skipped if token.is_cancelled() => Ok(vec![]),
+        Attended::Skipped => Err(format!("{why}؛ رد شد")),
+        Attended::TimedOut => Err(format!("{why}؛ در ۵ دقیقه انجام نشد")),
+    }
 }
 
 /// The platforms' own autocomplete: what people search around this product.
@@ -2002,7 +2030,7 @@ fn collect_texts(v: &Value, out: &mut Vec<String>, depth: usize) {
 
 /// Signs in to a platform in a visible window (the browser profile the searches use keeps the
 /// session). Returns when the user closes the window.
-pub async fn login(s: &Settings, profile: &Path, id: &str) -> Res<()> {
+pub async fn login(s: &Settings, profile: &Path, id: &str, token: &CancellationToken) -> Res<()> {
     let p = platform(id).ok_or("پلتفرم ناشناخته")?;
     let url = if p.login.is_empty() {
         p.page.replace("{q}", "").replace("{city}", "iran")
@@ -2015,6 +2043,7 @@ pub async fn login(s: &Settings, profile: &Path, id: &str) -> Res<()> {
     while !eng.proc.exited()
         && eng.alive.load(std::sync::atomic::Ordering::Relaxed)
         && std::time::Instant::now() < deadline
+        && !token.is_cancelled()
     {
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
@@ -2118,7 +2147,7 @@ pub async fn search(
         match r {
             Ok(mut found) => {
                 for o in &mut found {
-                    o.url = absolute(&o.url, p);
+                    verify_links(o);
                 }
                 let n = found
                     .iter()
@@ -2291,11 +2320,16 @@ mod tests {
     }
 
     #[test]
-    fn links_are_absolute() {
-        let p = super::platform("basalam").unwrap();
-        assert_eq!(super::absolute("/p/12", p), "https://basalam.com/p/12");
-        assert_eq!(super::absolute("https://x.ir/a", p), "https://x.ir/a");
-        assert_eq!(super::absolute("", p), "");
+    fn links_are_exact_or_dropped() {
+        let mut o = Offer { platform: "basalam".into(), url: "/shahd/product/12".into(), seller_url: "/shahd".into(), ..Default::default() };
+        super::verify_links(&mut o);
+        assert_eq!((o.url.as_str(), o.link.as_str(), o.seller_url.as_str()), ("https://basalam.com/shahd/product/12", "exact", "https://basalam.com/shahd"));
+        let mut home = Offer { platform: "basalam".into(), url: "https://basalam.com/".into(), ..Default::default() };
+        super::verify_links(&mut home);
+        assert_eq!((home.url.as_str(), home.link.as_str()), ("", ""), "the home page is never a product link");
+        let mut search = Offer { platform: "digikala".into(), url: "https://www.digikala.com/search/?q=x".into(), ..Default::default() };
+        super::verify_links(&mut search);
+        assert!(search.url.is_empty());
         assert!(super::platform("divar").is_some());
     }
 
@@ -2340,7 +2374,7 @@ mod tests {
         let o = offers_in(&tb, "torob", false);
         assert_eq!(
             (o[0].price, o[0].shops, o[0].url.as_str()),
-            (610_000, 14, "/p/abc/")
+            (610_000, 14, "https://torob.com/p/abc/")
         );
         // DOM cards with Persian digits
         let card =

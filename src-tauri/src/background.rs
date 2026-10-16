@@ -93,12 +93,9 @@ pub fn show_main(app: &AppHandle) {
 /// Quit for real (tray menu): a running job is stopped first and quits the app when it has shut down.
 fn quit(app: &AppHandle) {
     let st = app.state::<AppState>();
-    let slot = st.job.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((t, _)) = slot.as_ref() {
-        t.cancel();
+    if st.jobs.stop(None) {
         st.quit.store(true, std::sync::atomic::Ordering::Relaxed);
     } else {
-        drop(slot);
         app.exit(0);
     }
 }
@@ -115,11 +112,7 @@ pub fn tray(app: &tauri::App) -> tauri::Result<()> {
         .on_menu_event(|app, e| match e.id().as_ref() {
             "show" => show_main(app),
             "stop" => {
-                let st = app.state::<AppState>();
-                let slot = st.job.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some((t, _)) = slot.as_ref() {
-                    t.cancel();
-                }
+                app.state::<AppState>().jobs.stop(None);
             }
             "quit" => quit(app),
             _ => {}
@@ -142,7 +135,7 @@ pub fn scheduler(app: AppHandle) {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
             let st = app.state::<AppState>();
-            if st.job.lock().unwrap_or_else(|e| e.into_inner()).is_some() || !license::status(&st.db).valid {
+            if !st.jobs.running().is_empty() || !license::status(&st.db).valid {
                 continue;
             }
             let Some(s) = schedule::due(&st.db) else {
@@ -154,8 +147,8 @@ pub fn scheduler(app: AppHandle) {
                     let emit = move |e: crate::scanner::ScanEvent| {
                         let _ = h.emit("job-event", e);
                     };
-                    let res = commands::run_watch(&st, &ids, &emit).await;
-                    let skipped = matches!(&res, Err(e) if e == commands::BUSY);
+                    let res = commands::run_watch(&st, &ids, &emit, true).await;
+                    let skipped = matches!(&res, Err(e) if e == commands::BUSY || e == crate::jobs::BUSY_MANY);
                     let text = match &res {
                         Ok(sum) => sum.message.clone(),
                         Err(e) => format!("پایش قیمت انجام نشد: {e}"),
@@ -173,8 +166,8 @@ pub fn scheduler(app: AppHandle) {
             let emit = move |e: crate::scanner::ScanEvent| {
                 let _ = h.emit("job-event", e);
             };
-            let res = commands::run_scan(&st, s.req.clone(), &emit, None).await;
-            if matches!(&res, Err(e) if e == commands::BUSY) {
+            let res = commands::run_scan(Some(&app), &st, s.req.clone(), &emit, None, true).await;
+            if matches!(&res, Err(e) if e == commands::BUSY || e == crate::jobs::BUSY_MANY) {
                 // the user started a job in the meantime: try again on the next tick
                 let _ = app.emit("job-end", serde_json::json!({ "scheduled": true, "skipped": true }));
                 continue;
