@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" fill="none">
+  <defs>
+    <linearGradient id="iC1" x1="0" y1="-220" x2="170" y2="-40" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#5CA377"/><stop offset="45%" stop-color="#2E5E41"/><stop offset="85%" stop-color="#11291B"/><stop offset="100%" stop-color="#07120C"/></linearGradient>
+    <linearGradient id="iC2" x1="-160" y1="-160" x2="0" y2="-40" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#53966C"/><stop offset="50%" stop-color="#254F36"/><stop offset="90%" stop-color="#0D2115"/><stop offset="100%" stop-color="#050E09"/></linearGradient>
+    <linearGradient id="iC3" x1="-220" y1="40" x2="-40" y2="-80" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#4D8E65"/><stop offset="55%" stop-color="#1E422C"/><stop offset="100%" stop-color="#08140D"/></linearGradient>
+    <linearGradient id="iC4" x1="-20" y1="220" x2="-150" y2="60" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#46855E"/><stop offset="50%" stop-color="#1B3B27"/><stop offset="100%" stop-color="#07120B"/></linearGradient>
+    <linearGradient id="iC5" x1="180" y1="130" x2="10" y2="190" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#3D7552"/><stop offset="50%" stop-color="#163321"/><stop offset="100%" stop-color="#050D08"/></linearGradient>
+    <linearGradient id="iCurl1" x1="0" y1="0" x2="40" y2="-160" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#52C982"/><stop offset="55%" stop-color="#9AF5BA"/><stop offset="100%" stop-color="#C6FCD9"/></linearGradient>
+    <linearGradient id="iCurl2" x1="0" y1="0" x2="-130" y2="-80" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#48B876"/><stop offset="60%" stop-color="#8AEFAE"/><stop offset="100%" stop-color="#B0F8C9"/></linearGradient>
+    <linearGradient id="iCurl3" x1="0" y1="0" x2="90" y2="120" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#38945E"/><stop offset="65%" stop-color="#58B37C"/><stop offset="100%" stop-color="#76CF99"/></linearGradient>
+  <filter id="pShadow" x="-15%" y="-15%" width="130%" height="130%"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#06150D" flood-opacity="0.35"/></filter></defs>
+  <g transform="translate(268, 256) scale(0.95)" filter="url(#pShadow)">
+    <path d="M 0 0 L 0 -215 C 18 -245, 95 -235, 155 -180 C 215 -125, 225 -65, 190 -45 L 0 0 Z" fill="url(#iC1)"/>
+    <path d="M 0 0 L 0 -215 C 0 -175, 32 -135, 76 -112 L 0 0 Z" fill="url(#iCurl1)"/>
+    <path d="M 0 0 L -192 -108 C -222 -132, -182 -205, -110 -230 C -40 -252, 0 -240, 0 -215 L 0 0 Z" fill="url(#iC2)"/>
+    <path d="M 0 0 L -192 -108 C -152 -92, -102 -102, -72 -132 L 0 0 Z" fill="url(#iCurl1)"/>
+    <path d="M 0 0 L -192 110 C -228 122, -252 55, -245 -25 C -238 -95, -212 -125, -192 -108 L 0 0 Z" fill="url(#iC3)"/>
+    <path d="M 0 0 L -192 110 C -158 88, -140 42, -142 -6 L 0 0 Z" fill="url(#iCurl2)"/>
+    <path d="M 0 0 L 0 218 C 2 252, -72 248, -140 202 C -198 162, -212 120, -192 110 L 0 0 Z" fill="url(#iC4)"/>
+    <path d="M 0 0 L 0 218 C 2 178, -28 135, -72 112 L 0 0 Z" fill="url(#iCurl3)"/>
+    <path d="M 0 0 L 192 112 C 225 132, 190 202, 118 228 C 52 252, 2 245, 0 218 L 0 0 Z" fill="url(#iC5)"/>
+    <path d="M 0 0 L 192 112 C 155 95, 105 105, 74 134 L 0 0 Z" fill="url(#iCurl3)"/>
+    <circle cx="0" cy="0" r="3.5" fill="#C6FCD9"/>
+  </g>
+</svg>

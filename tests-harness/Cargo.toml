@@ -1,0 +1,33 @@
+[package]
+name = "harness"
+publish = false
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros"] }
+tokio-util = "0.7"
+futures = "0.3"
+rusqlite = { version = "0.32", features = ["bundled"] }
+chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
+reqwest = { version = "0.12", features = ["json"] }
+rust_xlsxwriter = "0.79"
+calamine = "0.26"
+encoding_rs = "0.8"
+ed25519-dalek = "2"
+sha2 = "0.10"
+getrandom = "0.2"
+
+[features]
+default = ["testkey", "test-seams"]
+test-seams = [] # local mock servers via HAMISTA_*_BASE (never in the app)
+testkey = [] # license.rs uses tests-harness/test-key.pub (throwaway key) instead of license.pub
+
+[dev-dependencies]
+hamista-cloud = { path = "../server" } # the real server, run in-process by tests/cloud.rs
+axum = "0.7"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("master", "issuer", "testkey", "test-seams"))'] } # app editions; harness = customer

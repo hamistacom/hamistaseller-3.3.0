@@ -1,0 +1,56 @@
+# Photo credits
+
+Photos are used under their Creative Commons licences (found via Openverse — Flickr — and Wikimedia Commons). Cropped and resized.
+
+- **k-cafe** — “Time to Unwind @ Earshot Cafe – The Arts House, Singapore” by williamcho, CC BY-SA 2.0 — https://www.flickr.com/photos/84493444@N00/4408803474
+- **k-construction** — “Tianjin Construction Site.” by @yakobusan Jakob Montrasio, CC BY 2.0 — https://www.flickr.com/photos/37803129@N00/2363688612
+- **k-dentist** — “Have you already been to your regular teeth inspection?” by prague.czech.photo, CC BY 2.0 — https://www.flickr.com/photos/99424477@N04/21081504314
+- **k-furniture** — “Sofa Living Room Interior Design Inspiration House” by homethods, CC BY 2.0 — https://www.flickr.com/photos/146625745@N08/36633084871
+- **k-garage** — “'Old Auto Repair Shop' Ghosts of the Midwest, NB 7-25-13a” by inkknife_2000 (11.5 million views), CC BY-SA 2.0 — https://www.flickr.com/photos/23155134@N06/10784105894
+- **k-gym** — “Fitness Gym Workout Weight Strength Training - Must link to https://thoroughlryeveiwed.com” by ThoroughlyReviewed, CC BY 2.0 — https://www.flickr.com/photos/143842337@N03/32932079655
+- **k-mobile** — “Mobile phone shop @MBK” by Honou, CC BY 2.0 — https://www.flickr.com/photos/9186550@N08/3772879352
+- **k-pharmacy** — “Old Pharmacy Shelves” by berniedup, CC BY-SA 2.0 — https://www.flickr.com/photos/65695019@N07/32190639097
+- **k-realestate** — “Tianjin Construction Site.” by @yakobusan Jakob Montrasio, CC BY 2.0 — https://www.flickr.com/photos/37803129@N00/2363688612
+- **k-restaurant** — “Restaurant interior Phuket Karon AD4A7790bs” by Phuketian.S, CC BY 2.0 — https://www.flickr.com/photos/124790945@N06/14469469973
+- **k-salon** — “Barber Shop [Explored]” by pennuja, CC BY 2.0 — https://www.flickr.com/photos/22749993@N08/8948021446
+- **k-school** — “Cal Poly classroom” by mellen_petrich, CC BY-SA 2.0 — https://www.flickr.com/photos/15168532@N00/8677583730
+- **m-appliance** — “kitchen appliances” by jm3, CC BY-SA 2.0 — https://www.flickr.com/photos/37996588780@N01/4685908
+- **m-cafe** — “Time to Unwind @ Earshot Cafe – The Arts House, Singapore” by williamcho, CC BY-SA 2.0 — https://www.flickr.com/photos/84493444@N00/4408803474
+- **m-carparts** — “Engine” by Accretion Disc, CC BY 2.0 — https://www.flickr.com/photos/23642145@N00/2903185831
+- **m-clothing** — “Woman's clothing store - Bargains” by My name's axel, CC BY-SA 2.0 — https://www.flickr.com/photos/37611179@N00/2168051341
+- **m-furniture** — “Sofa Living Room Interior Design Inspiration House” by homethods, CC BY 2.0 — https://www.flickr.com/photos/146625745@N08/36633084871
+- **m-honey** — “Small Honey Jar with Honeycomb” by Alabama Extension, CC CC0 1.0 — https://www.flickr.com/photos/184594136@N08/51330849013
+- **m-mobile** — “Mobile phone shop @MBK” by Honou, CC BY 2.0 — https://www.flickr.com/photos/9186550@N08/3772879352
+- **m-nuts** — “pistachio-nuts-in-bowl” by How can I recycle this, CC BY 2.0 — https://www.flickr.com/photos/87481332@N00/136837623
+- **m-oil** — “What dresses my salads” by WordRidden, CC BY 2.0 — https://www.flickr.com/photos/97844767@N00/34581074
+- **m-rice** — “Drying Rice Grains” by rumpleteaser, CC BY 2.0 — https://www.flickr.com/photos/45958245@N00/5026319882
+- **m-saffron** — “Saffron Threads 1g AUD6.30 - UCG Wholesale Foods” by avlxyz, CC BY-SA 2.0 — https://www.flickr.com/photos/10559879@N00/3217911148
+- **m-tea** — “Tea leaves” by allaboutgeorge, CC BY 2.0 — https://www.flickr.com/photos/35034347485@N01/4142791697
+- **p-ahvaz** — “Ahvaz White Bridge” by danchitnis, CC BY 2.0 — https://www.flickr.com/photos/83407683@N00/454291412
+- **p-ardabil** — “Sheikh Safi Al Din Ardabili Tomb” by MAF70, CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:Sheikh_Safi_Al_Din_Ardabili_Tomb.jpg
+- **p-bandarabbas** — “IA University. Bandar Abbas - panoramio” by ☆ SM MIRHOSSEINI, CC BY 3.0 — https://commons.wikimedia.org/w/index.php?curid=56646461
+- **p-birjand** — “قلعه بیرجند-2” by Soroush.javadian, CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:%D9%82%D9%84%D8%B9%D9%87_%D8%A8%DB%8C%D8%B1%D8%AC%D9%86%D8%AF-2.jpg
+- **p-bojnurd** — “Mofakham Mirror House by Arashk Rajabpour” by Arashk rp2, CC BY-SA 3.0 — https://commons.wikimedia.org/wiki/File:Mofakham_Mirror_House_by_Arashk_Rajabpour.jpg
+- **p-bushehr** — “. Bushehr Iran” by Malik dohani, CC BY 2.0 — https://www.flickr.com/photos/55152780@N04/5711851425
+- **p-gorgan** — “Gorgan, Iran” by Ninara, CC BY 2.0 — https://www.flickr.com/photos/37583176@N00/46842387731
+- **p-hamadan** — “Hamadan, Iran” by Ninara, CC BY 2.0 — https://www.flickr.com/photos/37583176@N00/3601355814
+- **p-ilam** — “Ilam iran” by Katiapic, CC BY-SA 4.0 — https://commons.wikimedia.org/w/index.php?curid=94815910
+- **p-isfahan** — “Naqsh-i Jahan Square, Jan. 2018” by احمد جمالی مقدم, CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:Naqsh-i_Jahan_Square,_Jan._2018.jpg
+- **p-karaj** — “Karaj, Iran” by Ninara, CC BY 2.0 — https://www.flickr.com/photos/37583176@N00/4013237455
+- **p-kerman** — “Kerman, Iran” by Ninara, CC BY 2.0 — https://www.flickr.com/photos/37583176@N00/3074088785
+- **p-kermanshah** — “Shapur II investiture at Taq-e Bustan” by dynamosquito, CC BY-SA 2.0 — https://www.flickr.com/photos/25182210@N07/4684094261
+- **p-khorramabad** — “Khorramabad, Iran” by Ninara, CC BY 2.0 — https://www.flickr.com/photos/37583176@N00/13975737013
+- **p-mashhad** — “Imam reza shrine in Mashhad” by Author: IA Source: Taken at the shrine of Imam Ali Reda in Mashad, Iran, in August, 2005., CC BY-SA 3.0 — https://commons.wikimedia.org/w/index.php?curid=5402738
+- **p-qazvin** — “Hamam Ghajar (historical bath) in Qazvin, Iran” by blondinrikard, CC BY 2.0 — https://www.flickr.com/photos/44093058@N06/43442316751
+- **p-qom** — “Hazrat-e Masumeh, Qom, Iran” by Fulvio Spada, CC BY-SA 2.0 — https://www.flickr.com/photos/78722206@N00/1259137114
+- **p-sari** — “Sun over the Lake at Soleyman-tange Dam, Sari, Iran” by Behdad Esfahbod, CC BY 2.0 — https://www.flickr.com/photos/94465595@N00/1832244571
+- **p-semnan** — “File:Darjazin, Semnan, Iran - panoramio (2).jpg” by matin fattahi, CC BY 3.0 — https://commons.wikimedia.org/w/index.php?curid=53684021
+- **p-shahrekord** — “IMG_9248 Shahrekord, Iran” by Ninara, CC BY 2.0 — https://www.flickr.com/photos/37583176@N00/5868624139
+- **p-shiraz** — “IMG_7947 Shiraz, Iran” by Ninara, CC BY 2.0 — https://www.flickr.com/photos/37583176@N00/14034999301
+- **p-tabriz** — “Tabriz, Iran 2013 (31) (15002673356)” by Dr. Nasser Haghighat, CC BY 2.0 — https://commons.wikimedia.org/w/index.php?curid=36239666
+- **p-tehran** — “North of Tehran Skyline view” by Ninara from Helsinki, Finland, CC BY-SA 3.0 — https://commons.wikimedia.org/w/index.php?curid=78157659
+- **p-urmia** — “Lake Urmia, Iran” by Ninara, CC BY 2.0 — https://www.flickr.com/photos/37583176@N00/27493175278
+- **p-yasuj** — “Celebration of Nowruz in Yasuj (13970101000424636572452161488780 21059)” by Darioush Behniazadeh, CC BY 4.0 — https://commons.wikimedia.org/w/index.php?curid=67562350
+- **p-yazd** — “IMG_2518 Yazd Iran” by Ninara, CC BY 2.0 — https://www.flickr.com/photos/37583176@N00/8666742074
+- **p-zahedan** — “Zahedan Railway Station” by Drsaeed90, CC BY-SA 3.0 — https://commons.wikimedia.org/w/index.php?curid=19499829
+- **p-zanjan** — “مسجد جامع سید زنجان02” by M4hdiyeh a, CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:%D9%85%D8%B3%D8%AC%D8%AF_%D8%AC%D8%A7%D9%85%D8%B9_%D8%B3%DB%8C%D8%AF_%D8%B2%D9%86%D8%AC%D8%A7%D9%8602.jpg

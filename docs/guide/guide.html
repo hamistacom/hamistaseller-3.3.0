@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>راهنمای جامع هامیستا سلر ۳٫۲</title>
+<style>
+@font-face { font-family: "Yekan Bakh"; src: url("../../ui/fonts/YekanBakh-VF.ttf") format("truetype"); font-weight: 100 1000; }
+@page { size: A4; margin: 16mm 15mm 18mm; }
+@page :first { margin: 0; }
+:root { --ink: #161616; --muted: #595959; --line: #e3e5dc; --lime: #bbf246; --lime-soft: #f1fcd6; --ok: #079a4f; }
+* { box-sizing: border-box; }
+html { font: 400 10.6pt/1.85 "Yekan Bakh", Tahoma, sans-serif; color: var(--ink); font-feature-settings: "ss01"; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body { margin: 0; }
+h1, h2, h3, h4, p { margin: 0; }
+p + p { margin-top: 6px; }
+.en { direction: ltr; unicode-bidi: isolate; font-feature-settings: normal; }
+
+/* cover */
+.cover { height: 297mm; background: #161616; color: #fff; position: relative; overflow: hidden; display: flex; flex-direction: column; padding: 26mm 22mm; page-break-after: always; }
+.cover::before, .cover::after { content: ""; position: absolute; border-radius: 50%; background: radial-gradient(closest-side, rgba(187, 242, 70, .35), transparent); }
+.cover::before { width: 150mm; height: 150mm; left: -50mm; top: -40mm; }
+.cover::after { width: 190mm; height: 190mm; right: -70mm; bottom: -70mm; opacity: .7; }
+.cover > * { position: relative; z-index: 1; }
+.cover .logo { width: 116mm; background: #fff; border-radius: 6mm; padding: 4mm 6mm; }
+.cover .k { margin-top: 34mm; color: var(--lime); font-weight: 600; letter-spacing: .3px; font-size: 12pt; }
+.cover h1 { font-size: 34pt; font-weight: 800; line-height: 1.35; margin-top: 3mm; }
+.cover .sub { font-size: 13pt; color: #cfcfcf; font-weight: 300; margin-top: 4mm; max-width: 140mm; }
+.cover .spaces { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5mm; margin-top: auto; }
+.cover .sp { border: 1px solid rgba(255, 255, 255, .14); background: rgba(255, 255, 255, .06); border-radius: 4mm; padding: 5mm; }
+.cover .sp b { display: block; color: var(--lime); font-size: 12.5pt; }
+.cover .sp span { color: #cfcfcf; font-size: 9.6pt; font-weight: 300; }
+.cover .meta { margin-top: 8mm; display: flex; justify-content: space-between; color: #9a9a9a; font-size: 9.5pt; }
+
+/* body */
+.chapter { page-break-before: always; }
+.cont { margin-top: 10mm; }
+.shot.short img { max-height: 78mm; }
+.shot.mini img { max-height: 58mm; }
+h3, .chap-h { break-after: avoid; }
+.shot img { max-height: 92mm; object-fit: cover; object-position: top; }
+.chap-h { display: flex; align-items: center; gap: 5mm; padding: 6mm 7mm; border-radius: 4mm; background: #161616; color: #fff; margin-bottom: 6mm; }
+.chap-h .n { width: 13mm; height: 13mm; border-radius: 3.5mm; background: var(--lime); color: var(--ink); font-weight: 800; font-size: 17pt; display: flex; align-items: center; justify-content: center; flex: none; }
+.chap-h h2 { font-size: 18pt; font-weight: 800; }
+.chap-h p { color: #cfcfcf; font-weight: 300; font-size: 10pt; }
+h3 { font-size: 13pt; font-weight: 700; margin: 6mm 0 2mm; display: flex; align-items: center; gap: 2.5mm; }
+h3::before { content: ""; width: 2.2mm; height: 5mm; border-radius: 1mm; background: var(--lime); }
+h4 { font-size: 11pt; font-weight: 700; margin: 3mm 0 1mm; }
+.shot { margin: 3mm 0 2mm; border-radius: 3mm; overflow: hidden; border: 1px solid var(--line); break-inside: avoid; }
+.shot img { display: block; width: 100%; }
+.cap { font-size: 8.8pt; color: var(--muted); margin-bottom: 4mm; text-align: center; }
+ol.steps { list-style: none; padding: 0; margin: 2mm 0; counter-reset: s; }
+ol.steps li { counter-increment: s; position: relative; padding: 1.4mm 10mm 1.4mm 0; break-inside: avoid; }
+ol.steps li::before { content: counter(s, persian); position: absolute; right: 0; top: 1.6mm; width: 7mm; height: 7mm; border-radius: 50%; background: var(--lime); color: var(--ink); font-weight: 700; font-size: 9.5pt; display: flex; align-items: center; justify-content: center; }
+ul { padding-inline-start: 6mm; margin: 2mm 0; }
+li { margin: .6mm 0; }
+.tip, .warn, .note { border-radius: 3mm; padding: 3.5mm 5mm; margin: 3mm 0; break-inside: avoid; font-size: 10pt; }
+.tip { background: var(--lime-soft); border-inline-start: 1.4mm solid var(--lime); }
+.warn { background: #fff5e6; border-inline-start: 1.4mm solid #f0a640; }
+.note { background: #f4f5f0; border-inline-start: 1.4mm solid #9a9a9a; }
+.tip b:first-child, .warn b:first-child, .note b:first-child { margin-inline-end: 1.5mm; }
+table { width: 100%; border-collapse: collapse; margin: 3mm 0; font-size: 9.8pt; break-inside: avoid; }
+th { background: #161616; color: #fff; font-weight: 600; text-align: start; padding: 2.2mm 3mm; }
+th:first-child { border-start-start-radius: 2mm; } th:last-child { border-start-end-radius: 2mm; }
+td { padding: 2.2mm 3mm; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:nth-child(even) td { background: #fafbf7; }
+td b { white-space: nowrap; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; }
+.card { border: 1px solid var(--line); border-radius: 3mm; padding: 4mm 5mm; break-inside: avoid; }
+.card h4 { margin-top: 0; }
+.formula { direction: ltr; text-align: center; font-family: Consolas, monospace; background: #161616; color: var(--lime); border-radius: 2.5mm; padding: 3mm; margin: 2mm 0; font-size: 10pt; }
+.toc { columns: 2; column-gap: 10mm; margin-top: 4mm; }
+.toc a { display: flex; gap: 3mm; text-decoration: none; color: inherit; padding: 2mm 0; border-bottom: 1px dashed var(--line); break-inside: avoid; }
+.toc a b { width: 7mm; height: 7mm; border-radius: 2mm; background: var(--lime); display: inline-flex; align-items: center; justify-content: center; flex: none; font-size: 9.5pt; }
+.small { font-size: 9pt; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <img class="logo" src="../logo-horizontal.png" alt="هامیستا سلر">
+  <div class="k">راهنمای جامع کاربر · نسخه ۳٫۲</div>
+  <h1>هامیستا سلر<br>هوش تجاری و تحلیل بازار</h1>
+  <p class="sub">از پیدا کردن مشتری و ساختن بانک اطلاعات کسب‌وکارها، تا قیمت‌گذاری علمی کالا و سنجش سلامت برند؛ همه در یک برنامه سبک و پرتابل ویندوز.</p>
+  <div class="spaces">
+    <div class="sp"><b>اطلاعات مشتریان</b><span>استخراج اطلاعات عمومی کسب‌وکارها، بانک مشتریان، کمپین و دستیار گفتگو</span></div>
+    <div class="sp"><b>تحلیل محصول</b><span>قیمت بازار با بازه دلخواه، حالت فروشنده/خریدار، محصولات با عکس، برندها و کانال‌های فروش</span></div>
+    <div class="sp"><b>تحلیل برند</b><span>پیدا کردن خودکار سایت و پیج، آمیخته بازاریابی 4P، SWOT، کانال‌ها و رقبا</span></div>
+  </div>
+  <div class="meta"><span>تیم هامیستا · hamista.ir · تلگرام @hamistaa</span><span>{{DATE}}</span></div>
+</section>
+
+<section>
+  <div class="chap-h"><div class="n">◆</div><div><h2>فهرست</h2><p>هر فصل با تصویر واقعی همان صفحه از برنامه همراه است.</p></div></div>
+  <nav class="toc">
+    <a href="#c1"><b>۱</b>شروع کار: نسخه‌ها، اجرا و فعال‌سازی</a>
+    <a href="#c2"><b>۲</b>آشنایی با محیط برنامه</a>
+    <a href="#c3"><b>۳</b>داشبورد</a>
+    <a href="#c4"><b>۴</b>استخراج کسب‌وکارها</a>
+    <a href="#c5"><b>۵</b>بانک‌ها، مخاطبان و کارت مشتری</a>
+    <a href="#c6"><b>۶</b>کمپین‌ها و دستیار گفتگو</a>
+    <a href="#c7"><b>۷</b>زمان‌بندی و کار در پس‌زمینه</a>
+    <a href="#c8"><b>۸</b>تحلیل محصول</a>
+    <a href="#c9"><b>۹</b>تحلیل برند</a>
+    <a href="#c10"><b>۱۰</b>تنظیمات، پشتیبان و لایسنس</a>
+    <a href="#c11"><b>۱۱</b>پنل مدیر (فروش لایسنس)</a>
+    <a href="#c12"><b>۱۲</b>رفع اشکال و پرسش‌های رایج</a>
+    <a href="#c13"><b>۱۳</b>اصول استفاده مسئولانه</a>
+  </nav>
+  <div class="tip" style="margin-top:8mm"><b>نکته:</b> در هر صفحه از برنامه، دکمه <b>ⓘ</b> بالای صفحه راهنمای همان صفحه را باز می‌کند. این سند نسخه کامل و چاپی همان راهنماست.</div>
+</section>
+
+<section class="chapter" id="c1">
+  <div class="chap-h"><div class="n">۱</div><div><h2>شروع کار</h2><p>سه نسخه، بدون نصب، با داده‌های کنار خود برنامه</p></div></div>
+  <table>
+    <tr><th>فایل</th><th>برای چه کسی</th><th>لایسنس</th></tr>
+    <tr><td><b class="en">HamistaSeller.exe</b></td><td>مشتری؛ همین فایل را بفروشید یا بفرستید</td><td>لازم دارد (آفلاین یا حساب آنلاین)</td></tr>
+    <tr><td><b class="en">HamistaSeller-Master.exe</b></td><td>استفاده شخصی شما، بدون محدودیت</td><td>لازم ندارد؛ آن را منتشر نکنید</td></tr>
+    <tr><td><b class="en">HamistaAdmin.exe</b></td><td>پنل مدیر: صدور لایسنس، مشتریان، سرور</td><td>—</td></tr>
+  </table>
+  <h3>اجرا</h3>
+  <ol class="steps">
+    <li>فایل را در یک پوشه دلخواه بگذارید (مثلاً <span class="en">D:\Apps</span>) و اجرا کنید. برنامه نصب نمی‌شود.</li>
+    <li>داده‌ها در پوشه <b class="en">HamistaSeller-Data</b> کنار فایل ساخته می‌شوند؛ برای انتقال به سیستم دیگر، فایل و همین پوشه را با هم کپی کنید.</li>
+    <li>برای استخراج و قیمت‌یابی، <b>Microsoft Edge</b> یا <b>Google Chrome</b> باید روی ویندوز باشد (Edge روی همه ویندوزهای ۱۰ و ۱۱ هست).</li>
+  </ol>
+  <h3>فعال‌سازی نسخه مشتری</h3>
+  <ol class="steps">
+    <li>مشتری برنامه را باز می‌کند؛ «کد سیستم» او نمایش داده می‌شود و آن را برای شما می‌فرستد.</li>
+    <li>شما در <b>پنل مدیر ← مشتریان</b> برای همان کد سیستم، پلن و تاریخ پایان لایسنس صادر می‌کنید.</li>
+    <li>مشتری کد لایسنس را در «تنظیمات ← لایسنس ← کد آفلاین» می‌چسباند. اگر سرور آنلاین دارید، می‌تواند با نام کاربری و رمز هم وارد شود.</li>
+  </ol>
+  <div class="warn"><b>مهم:</b> اگر پیام «کد لایسنس معتبر نیست» دیدید، کلید خصوصی داخل فایل <span class="en">KEYS-PRIVATE.txt</span> را یک بار در «پنل مدیر ← کلید و پشتیبان ← ورود کلید خصوصی» وارد کنید و دوباره صادر کنید. این فایل را جای امن نگه دارید و برای کسی نفرستید.</div>
+</section>
+
+<section class="chapter" id="c2">
+  <div class="chap-h"><div class="n">۲</div><div><h2>آشنایی با محیط برنامه</h2><p>سه فضای کاری، منوی کناری، و حالت تیره یا روشن</p></div></div>
+  <div class="two">
+    <div class="card"><h4>سوییچر فضای کاری</h4><p>سه دکمه بالای منو: <b>اطلاعات مشتریان</b>، <b>تحلیل محصول</b> و <b>تحلیل برند</b>. با هر کدام، منوی کناری فقط صفحه‌های همان فضا را نشان می‌دهد.</p></div>
+    <div class="card"><h4>جستجوی سریع مخاطب</h4><p>نام، شماره یا شهر را در کادر جستجوی منو بنویسید؛ از هر صفحه‌ای به کارت مشتری می‌رسید.</p></div>
+    <div class="card"><h4>حالت تیره / روشن و زبان</h4><p>پایین منو: دکمه ماه/خورشید برای تغییر حالت، و <b class="en">EN</b> برای رابط انگلیسی. انتخاب شما ذخیره می‌شود.</p></div>
+    <div class="card"><h4>کار در پس‌زمینه</h4><p>استخراج و قیمت‌یابی در پس‌زمینه اجرا می‌شوند؛ کارت پیشرفت پایین منو همیشه وضعیت را نشان می‌دهد و می‌توانید در صفحه‌های دیگر کار کنید.</p></div>
+  </div>
+</section>
+
+<section class="chapter" id="c3">
+  <div class="chap-h"><div class="n">۳</div><div><h2>داشبورد</h2><p>وضعیت بانک مشتریان در یک نگاه</p></div></div>
+  <div class="shot"><img src="shots/01-dashboard.jpg" alt=""></div>
+  <div class="cap">داشبورد در حالت تیره: بنر آخرین استخراج با عکس همان شهر، شاخص‌ها، قیف پیگیری و روند ورود مخاطب.</div>
+  <ul>
+    <li><b>بنر و شاخص‌ها:</b> آخرین استخراج با عکس همان شهر، کل مخاطبان و پیام‌های موفق با رشد نسبت به دوره قبل.</li>
+    <li><b>پیگیری و روند:</b> قیف «پیگیری‌نشده ← در حال پیگیری ← علاقه‌مند ← مشتری» و نمودار ورود مخاطب هفتگی یا روزانه.</li>
+    <li><b>بینش هوشمند و شروع سریع:</b> یک پیشنهاد عملی از داده‌های خودتان، و کارت‌های عکس‌دار حوزه‌ها که با یک کلیک فرم استخراج را آماده می‌کنند.</li>
+  </ul>
+</section>
+
+<section class="chapter" id="c4">
+  <div class="chap-h"><div class="n">۴</div><div><h2>استخراج کسب‌وکارها</h2><p>ساختن بانک مشتری از اطلاعات عمومی کسب‌وکارها</p></div></div>
+  <div class="shot short"><img src="shots/02-scan.jpg" alt=""></div>
+  <div class="cap">بنر بالای فرم با انتخاب استان و شهر، عکس همان محدوده را نشان می‌دهد.</div>
+  <ol class="steps">
+    <li><b>بانک مقصد</b> را انتخاب کنید یا با «بانک جدید» بسازید (مثلاً «کافه‌های شیراز»).</li>
+    <li><b>کلمات کلیدی</b> را بنویسید و Enter بزنید؛ هر کلمه جداگانه جستجو می‌شود. چند هم‌معنی (کافه، کافی‌شاپ) پوشش را بیشتر می‌کند.</li>
+    <li><b>محدوده</b>: زبانه «شهرستان» (یک شهرستان یا «همه شهرهای استان») یا «شهر / منطقه» برای یک محله دقیق (مثل تجریش یا منطقه ۵).</li>
+    <li><b>تعداد برای هر کلمه</b> سقف بررسی است. «خواندن سایت کسب‌وکار» ایمیل، شبکه‌های اجتماعی و نام مدیر را هم از سایت هر کسب‌وکار می‌خواند (کندتر ولی کامل‌تر).</li>
+    <li>«شروع استخراج» را بزنید. سمت چپ، مراحل و گزارش زنده را می‌بینید. اگر کار نیمه‌کاره ماند، از همان صفحه «ادامه» بزنید.</li>
+  </ol>
+  <div class="tip"><b>دقت خروجی:</b> شماره‌ها به قالب استاندارد ایران تبدیل می‌شوند، موبایل و تلفن ثابت جدا ذخیره می‌شوند، تکراری‌ها در هر بانک رد می‌شوند و فقط کسب‌وکارهای دارای حداقل یک راه ارتباطی ذخیره می‌شوند.</div>
+  <div class="note"><b>تنظیمات پیشرفته مرورگر:</b> تعداد تب هم‌زمان، نمایش پنجره مرورگر و «جستجو در محله‌های اطراف وقتی نتیجه کم است». اگر سایت تأیید «ربات نیستم» خواست، پنجره باز می‌شود؛ تأیید کنید تا ادامه دهد.</div>
+</section>
+
+<section class="chapter" id="c5">
+  <div class="chap-h"><div class="n">۵</div><div><h2>بانک‌ها، مخاطبان و کارت مشتری</h2><p>مرتب‌سازی، پیگیری و خروجی گرفتن</p></div></div>
+  <div class="shot"><img src="shots/03-contacts.jpg" alt=""></div>
+  <div class="cap">ردیف‌ها شماره‌گذاری شده‌اند؛ موبایل و تلفن ثابت در دو ستون جدا؛ آیکن رنگی هر راه ارتباطی.</div>
+  <ul>
+    <li><b>فیلتر</b> بر اساس استان، شهرستان، حوزه کاری، وضعیت، برچسب و نوع راه ارتباطی.</li>
+    <li><b>انتخاب گروهی:</b> تغییر وضعیت، برچسب، کپی یا انتقال به بانک دیگر، حذف.</li>
+    <li><b>ورود Excel / CSV</b> و <b>خروجی Excel، CSV و vCard</b> (برای گوشی).</li>
+    <li>زبانه <b>تحلیل و تفکیک</b>: سهم هر استان، شهرستان و حوزه کاری.</li>
+  </ul>
+  <div class="shot"><img src="shots/04-card.jpg" alt=""></div>
+  <div class="cap">کارت مشتری دو ستونه: راه‌های ارتباطی با کپی و باز کردن، و مشخصات، وضعیت و یادداشت.</div>
+</section>
+
+<section class="chapter" id="c6">
+  <div class="chap-h"><div class="n">۶</div><div><h2>کمپین‌ها و دستیار گفتگو</h2><p>یک پیام برای یک گروه؛ با پیامک یا پیام‌رسان شخصی خودتان</p></div></div>
+  <div class="shot"><img src="shots/05-campaign.jpg" alt=""></div>
+  <ol class="steps">
+    <li><b>مخاطبان:</b> بانک و وضعیت را انتخاب کنید (یا ردیف‌هایی که در جدول انتخاب کرده‌اید).</li>
+    <li><b>روش ارسال:</b> «پیامک خودکار» از پنل پیامک شما، یا «پیام‌رسان با حساب خودتان» (واتساپ، تلگرام، ایتا، بله).</li>
+    <li><b>متن:</b> با جای‌نگهدارهایی مثل <span class="en">{name}</span> و <span class="en">{city}</span>؛ پیش‌نمایش، تعداد پیامک و زمان تقریبی را می‌بینید و می‌توانید ارسال آزمایشی بزنید.</li>
+  </ol>
+  <h3>دستیار گفتگو</h3>
+  <p>یک بار با «ورود / تغییر حساب» وارد پیام‌رسان خودتان شوید. صف مخاطبان ساخته می‌شود؛ گفتگوی هر نفر با متن آماده باز می‌شود و <b>ارسال را خودتان می‌زنید</b>. با «حساب ندارد» کنار آن شماره علامت می‌خورد که در آن پیام‌رسان نیست. «خروج کامل» ورود ذخیره‌شده را پاک می‌کند.</p>
+  <div class="note"><b>رعایت قوانین:</b> شماره‌های «لیست عدم ارسال» و کسانی که «لغو۱۱» فرستاده‌اند هرگز پیام نمی‌گیرند. ارسال انبوه خودکار در پیام‌رسان‌ها عمداً ساخته نشده تا حساب شما مسدود نشود.</div>
+</section>
+
+<section class="cont" id="c7">
+  <div class="chap-h"><div class="n">۷</div><div><h2>زمان‌بندی و کار در پس‌زمینه</h2><p>استخراج خودکار روزانه یا هفتگی</p></div></div>
+  <ul>
+    <li>در «زمان‌بندی»، استخراج یک‌باره، روزانه یا هفتگی در ساعت دلخواه بسازید.</li>
+    <li>برنامه باید باز یا در سینی ویندوز (کنار ساعت) باشد. «اجرا همراه ویندوز» را روشن کنید تا همیشه آماده باشد.</li>
+    <li>نتیجه هر اجرا در «تاریخچه» با دکمه «ادامه» ثبت می‌شود.</li>
+  </ul>
+</section>
+
+<section class="cont" id="c8">
+  <div class="chap-h"><div class="n">۸</div><div><h2>تحلیل محصول</h2><p>قیمت واقعی بازار، قیمت فروش پیشنهادی و بهترین منبع خرید</p></div></div>
+  <div class="shot"><img src="shots/06-market.jpg" alt=""></div>
+  <div class="cap">بالای صفحه: حالت فروشنده/خریدار، کالا، برند (فهرست الفبایی)، بازه قیمت، تعداد نتیجه، ترتیب و نوع تطبیق.</div>
+  <ol class="steps">
+    <li><b>حالت</b> را انتخاب کنید: «فروشنده هستم» (قیمت پیشنهادی فروش و حاشیه سود) یا «خریدار هستم» (ارزان‌ترین معتبر، بهترین ارزش، معتبرترین فروشنده).</li>
+    <li>نام کالا را بنویسید. <b>برند</b> را از فهرست الفبایی و بدون تکرار انتخاب کنید؛ اگر نبود، همان‌جا تایپ کنید.</li>
+    <li><b>بازه قیمت</b> (حداقل/حداکثر تومان) را بدهید تا آگهی‌های بی‌ربط مثل «۱۰۰۰ تومان» یا لوازم گران حذف شوند.</li>
+    <li><b>تعداد نتیجه از هر منبع</b> (۳۰ تا ۲۰۰) و <b>ترتیب در منبع</b> (مرتبط‌ترین، پرفروش‌ترین، پربازدیدترین، ارزان‌ترین، گران‌ترین، جدیدترین) را تعیین کنید. برنامه چند صفحه را می‌خواند تا به تعداد برسد.</li>
+    <li><b>تطبیق دقیق</b>: «چوب پینگ پنگ» فقط چوب را می‌آورد، نه میز. «تطبیق گسترده» نتایج نزدیک‌تر را هم نگه می‌دارد. غلط‌های رایج نوشتاری (فریز/فریزر، ی و ک عربی) خودکار یکی می‌شوند.</li>
+    <li><b>منطقه</b> (استان، شهر و «فقط همین منطقه») برای دیوار و شیپور است.</li>
+    <li>«تحلیل بازار» را بزنید.</li>
+  </ol>
+  <div class="note"><b>ورود و کپچا:</b> اگر سایتی ورود بخواهد یا «من ربات نیستم» نشان دهد، برنامه یک پنجره مرورگر باز می‌کند؛ کار را در آن انجام دهید تا جستجو خودکار ادامه پیدا کند (تا ۱۰ دقیقه). کنار هر منبع دکمه «ورود» هم هست.</div>
+  <h3>زبانه‌های نتیجه</h3>
+  <table>
+    <tr><th>زبانه</th><th>چه چیزی</th></tr>
+    <tr><td><b>خلاصه</b></td><td>کف، میانه، سقف، قیمت پیشنهادی یا بهترین خرید، توصیه، زیردسته‌ها و جستجوهای مرتبط.</td></tr>
+    <tr><td><b>محصولات</b></td><td>عکس، نام کامل، نشان منبع، فروشنده و شهر، امتیاز و فروش، قیمت، زمان به‌روزرسانی و ارزش؛ مرتب‌سازی بر اساس ارزش، ارزان‌ترین، گران‌ترین، امتیاز، نظر، فروش و جدیدترین.</td></tr>
+    <tr><td><b>برندها</b></td><td>فهرست الفبایی برندها با تعداد، کمترین و میانه قیمت؛ «فقط این برند» و «افزودن به برندها».</td></tr>
+    <tr><td><b>کانال‌ها</b></td><td>هر منبع فروش: تعداد عرضه، میانه، کف و روش خرید.</td></tr>
+    <tr><td><b>تاریخچه</b></td><td>تحلیل‌های قبلی همین کالا و روند قیمت.</td></tr>
+  </table>
+  <div class="shot"><img src="shots/07-market-detail.jpg" alt=""></div>
+  <div class="cap">زبانه محصولات: عکس و نام کامل کالا، منبع، قیمت و زمان آخرین به‌روزرسانی.</div>
+  <h3>اعداد چطور حساب می‌شوند</h3>
+  <table>
+    <tr><th>شاخص</th><th>روش</th></tr>
+    <tr><td><b>کف و سقف معتبر</b></td><td>قیمت‌های غیرعادی با روش IQR کنار گذاشته می‌شوند؛ اگر وزن در عنوان باشد، مقایسه «هر کیلوگرم / لیتر» است.</td></tr>
+    <tr><td><b>میانگین وزنی</b></td><td>فروشنده معتبرتر (امتیاز و نظر بیشتر) وزن بیشتری دارد.</td></tr>
+    <tr><td><b>قیمت پیشنهادی فروش</b></td><td>بهای تمام‌شده × (۱ + حاشیه هدف)، محدود به بازه رقابتی و گرد شده به قیمت قفسه‌ای.</td></tr>
+    <tr><td><b>ارزش خرید</b></td><td>۵۵٪ مزیت قیمت، ۳۵٪ امتیاز فروشنده، ۱۰٪ تعداد نظر.</td></tr>
+  </table>
+  <div class="formula">SRP = shelf( clamp( cost × (1 + margin), P25, P75 ) )</div>
+  <div class="shot"><img src="shots/11-market-brands.jpg" alt=""></div>
+  <div class="cap">زبانه برندها: فهرست الفبایی و بدون تکرار.</div>
+  <div class="tip"><b>بازار این ماه:</b> صفحه خالی «تحلیل محصول» کالاهای پرجستجوی ۳۰ روز اخیر شما را با تغییر میانه قیمت نشان می‌دهد. با یک کلیک دوباره تحلیل کنید.</div>
+  <div class="note"><b>حریم خصوصی:</b> از دیوار و شیپور فقط عنوان، قیمت، عکس، شهر و زمان آگهی خوانده می‌شود؛ هیچ شماره یا اطلاعات تماسی خوانده نمی‌شود.</div>
+</section>
+
+<section class="chapter" id="c9">
+  <div class="chap-h"><div class="n">۹</div><div><h2>تحلیل برند</h2><p>از یک نام تا تحلیل کامل بازاریابی</p></div></div>
+  <div class="shot"><img src="shots/08-brands.jpg" alt=""></div>
+  <ol class="steps">
+    <li>«افزودن برند ما» یا «افزودن رقیب»: فقط <b>نام</b> و <b>دسته کالا</b> کافی است. سایت و اینستاگرام را خالی بگذارید تا از روی نام پیدا شوند.</li>
+    <li>«تحلیل» را بزنید. برنامه سایت و پیج را پیدا می‌کند، دسته کالا و خود برند را در ترب، دیجی‌کالا و باسلام جستجو می‌کند و سایت را ممیزی می‌کند.</li>
+  </ol>
+  <div class="shot"><img src="shots/10-brand-mix.jpg" alt=""></div>
+  <div class="cap">آمیخته بازاریابی (محصول، قیمت، توزیع، ترویج)، کانال‌ها و SWOT.</div>
+  <table>
+    <tr><th>بخش</th><th>چه چیزی</th></tr>
+    <tr><td><b>شاخص سلامت</b></td><td>حضور در بازار، کیفیت درک‌شده، حضور دیجیتال و شبکه اجتماعی (۰ تا ۱۰۰).</td></tr>
+    <tr><td><b>آمیخته 4P</b></td><td>امتیاز و توضیح برای تنوع محصول، جایگاه قیمت، گستردگی توزیع و ترویج.</td></tr>
+    <tr><td><b>کانال‌ها و محصولات</b></td><td>کانال‌های فروش برند با سهم و میانه، پرفروش‌ترین محصولات و فروشندگان اصلی.</td></tr>
+    <tr><td><b>رقبا</b></td><td>برندهای دیگر همان دسته با سهم و شاخص قیمت.</td></tr>
+    <tr><td><b>SWOT</b></td><td>قوت، ضعف، فرصت و تهدید به زبان ساده، با اقدام‌های پیشنهادی.</td></tr>
+  </table>
+  <h3>تاریخچه</h3>
+  <p>صفحه «تاریخچه» زبانه‌های جدا دارد: استخراج‌ها، <b>تحلیل محصول</b>، <b>تحلیل برند</b> (با تغییر امتیاز نسبت به دفعه قبل)، کمپین‌ها و فعالیت‌ها.</p>
+</section>
+
+<section class="chapter" id="c10">
+  <div class="chap-h"><div class="n">۱۰</div><div><h2>تنظیمات، پشتیبان و لایسنس</h2><p>همه چیز در یک صفحه با زبانه‌های جدا</p></div></div>
+  <table>
+    <tr><th>زبانه</th><th>کار</th></tr>
+    <tr><td><b>عمومی</b></td><td>مسیر مرورگر، اجرا همراه ویندوز، سرعت و تعداد تب.</td></tr>
+    <tr><td><b>پنل پیامک</b></td><td>اتصال پنل پیامک با ارسال آزمایشی.</td></tr>
+    <tr><td><b>قالب‌های پیام / لیست عدم ارسال</b></td><td>متن‌های آماده و شماره‌هایی که نباید پیام بگیرند.</td></tr>
+    <tr><td><b>ماژول‌ها</b></td><td>روشن و خاموش کردن «خواندن سایت کسب‌وکار».</td></tr>
+    <tr><td><b>پشتیبان‌گیری</b></td><td>پشتیبان دستی و بازگردانی کل داده‌ها.</td></tr>
+    <tr><td><b>لایسنس</b></td><td>«حساب آنلاین» یا «کد آفلاین»، کد سیستم و همگام‌سازی.</td></tr>
+    <tr><td><b>درباره</b></td><td>نسخه برنامه و راه‌های تماس با پشتیبانی.</td></tr>
+  </table>
+</section>
+
+<section class="cont" id="c11">
+  <div class="chap-h"><div class="n">۱۱</div><div><h2>پنل مدیر</h2><p>فروش و مدیریت لایسنس مشتریان</p></div></div>
+  <ul>
+    <li><b>مشتریان:</b> ثبت مشتری با کد سیستم، صدور و تمدید لایسنس (تمدید از تاریخ پایان فعلی اگر هنوز فعال است، وگرنه از امروز).</li>
+    <li><b>کلید و پشتیبان:</b> ورود یا ساخت کلید امضا، پشتیبان‌گیری از کلید.</li>
+    <li><b>سرور (اختیاری):</b> کاربران آنلاین، پلن‌ها، دوره آزمایشی، اعلان‌ها و «سناریو»ها برای اصلاح از راه دور.</li>
+  </ul>
+  <div class="note"><b>اصلاح از راه دور قیمت‌یابی:</b> اگر ساختار سایتی عوض شد، سناریوی <span class="en">market.&lt;id&gt;.api</span> یا <span class="en">market.&lt;id&gt;.page</span> (برای <span class="en">torob, digikala, basalam, emalls, divar, sheypoor</span>) را تنظیم کنید؛ نیازی به ساخت دوباره برنامه نیست.</div>
+</section>
+
+<section class="chapter" id="c12">
+  <div class="chap-h"><div class="n">۱۲</div><div><h2>رفع اشکال و پرسش‌های رایج</h2><p>کوتاه و کاربردی</p></div></div>
+  <table>
+    <tr><th>مشکل</th><th>راه حل</th></tr>
+    {{PROBLEMS}}
+    <tr><td><b>قیمت‌یابی برای یک سایت «خطا» داد</b></td><td>اینترنت را بررسی کنید و کمی بعد تکرار کنید؛ اگر ادامه داشت، سناریوی اصلاحی از پنل مدیر منتشر کنید.</td></tr>
+    <tr><td><b>عکس شهر نمایش داده نشد</b></td><td>عکس شهرهای کوچک از ویکی‌پدیا گرفته می‌شود؛ اگر در دسترس نباشد عکس مرکز استان نمایش داده می‌شود.</td></tr>
+  </table>
+</section>
+
+<section class="chapter" id="c13">
+  <div class="chap-h"><div class="n">۱۳</div><div><h2>اصول استفاده مسئولانه</h2><p>برای سلامت حساب‌های شما و احترام به حریم خصوصی</p></div></div>
+  <ul>
+    <li>برنامه فقط اطلاعات <b>عمومی کسب‌وکارها</b> را جمع می‌کند؛ اطلاعات اشخاص، اعضای گروه‌ها و دنبال‌کنندگان صفحه‌ها استخراج نمی‌شود.</li>
+    <li>از دیوار و شیپور فقط <b>قیمت و عنوان آگهی</b> برای تحلیل بازار خوانده می‌شود؛ شماره آگهی‌دهنده‌ها خوانده نمی‌شود.</li>
+    <li>پیام فقط به کسانی بفرستید که احتمال علاقه دارند؛ لیست عدم ارسال و درخواست «لغو۱۱» همیشه رعایت می‌شود.</li>
+    <li>ارسال در پیام‌رسان‌ها با حساب خودتان و با تأیید خودتان انجام می‌شود؛ چرخش حساب و دور زدن محدودیت ضداسپم عمداً پشتیبانی نمی‌شود.</li>
+  </ul>
+  <p class="small" style="margin-top:8mm">عکس‌های داخل برنامه با مجوزهای Creative Commons استفاده شده‌اند؛ نام عکاس روی هر عکس و فهرست کامل در فایل <span class="en">ui/img/CREDITS.md</span> آمده است.</p>
+  <div class="tip" style="margin-top:6mm"><b>پشتیبانی:</b> تیم هامیستا · <span class="en">hamista.ir</span> · تلگرام <span class="en">@hamistaa</span></div>
+</section>
+</body>
+</html>
