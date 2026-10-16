@@ -15,8 +15,23 @@ use std::time::Duration;
 use tokio::time::sleep;
 
 const RESERVED: &[&str] = &[
-    "p", "reel", "reels", "explore", "accounts", "stories", "tv", "direct", "about", "legal",
-    "developer", "web", "share", "challenge", "privacy", "help", "directory",
+    "p",
+    "reel",
+    "reels",
+    "explore",
+    "accounts",
+    "stories",
+    "tv",
+    "direct",
+    "about",
+    "legal",
+    "developer",
+    "web",
+    "share",
+    "challenge",
+    "privacy",
+    "help",
+    "directory",
 ];
 
 /// `https://www.instagram.com/cafe.lamiz/` → `cafe.lamiz`; posts / explore pages → None.
@@ -26,9 +41,7 @@ pub fn handle_of(url: &str) -> Option<String> {
         return None;
     }
     let first = path.split(['/', '?', '#']).find(|s| !s.is_empty())?;
-    let ok = (2..=30).contains(&first.len())
-        && first.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_')
-        && !first.starts_with('.');
+    let ok = (2..=30).contains(&first.len()) && first.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_') && !first.starts_with('.');
     (ok && !RESERVED.contains(&first.to_lowercase().as_str())).then(|| first.to_string())
 }
 
@@ -109,13 +122,7 @@ pub async fn read(http: &reqwest::Client, api: Option<&Api>, hit: &Hit, place: P
     read_with_page(http, api, None, hit, place).await
 }
 
-pub async fn read_with_page(
-    http: &reqwest::Client,
-    api: Option<&Api>,
-    page: Option<&Page>,
-    hit: &Hit,
-    mut place: Place,
-) -> Res<Option<Found>> {
+pub async fn read_with_page(http: &reqwest::Client, api: Option<&Api>, page: Option<&Page>, hit: &Hit, mut place: Place) -> Res<Option<Found>> {
     let Some(handle) = handle_of(&hit.url) else { return Ok(None) };
     let (mut name, mut bio, mut website, mut followers) = match api {
         Some(api) => match api.discover(http, &handle).await? {
@@ -168,8 +175,7 @@ pub async fn read_with_page(
         }
     }
 
-    let kw_in_bio = !place.keyword.trim().is_empty()
-        && crate::logic::name_key(&format!("{name} {bio}")).contains(&crate::logic::name_key(&place.keyword));
+    let kw_in_bio = !place.keyword.trim().is_empty() && crate::logic::name_key(&format!("{name} {bio}")).contains(&crate::logic::name_key(&place.keyword));
     let has_contact = !(c.mobiles.is_empty() && c.landlines.is_empty() && c.emails.is_empty() && c.website.is_empty());
     let business = api.is_some() || has_contact || kw_in_bio;
     if !business {

@@ -66,22 +66,98 @@ pub struct WebResult {
 
 /// Marketplaces and aggregators that are not a shop's own site (already covered by the platforms).
 const MARKETPLACES: &[&str] = &[
-    "torob.com", "digikala.com", "basalam.com", "emalls.ir", "divar.ir", "sheypoor.com", "mizanplus", "banimode.com",
-    "okala.com", "snapp.market", "digistyle.com", "timcheh.com", "esam.ir", "iranrng.com", "kilid.com",
+    "torob.com",
+    "digikala.com",
+    "basalam.com",
+    "emalls.ir",
+    "divar.ir",
+    "sheypoor.com",
+    "mizanplus",
+    "banimode.com",
+    "okala.com",
+    "snapp.market",
+    "digistyle.com",
+    "timcheh.com",
+    "esam.ir",
+    "iranrng.com",
+    "kilid.com",
 ];
-const DIRECTORIES: &[&str] = &["esfahan.ir", "parsbanfood", "tejaratbazar", "iranzamin", "irandoc", "bazarche", "niazerooz", "ependar", "istgah.com", "panakala", "tjpco", "pd() ", "aradbranding"];
-const BLOGS: &[&str] = &["blog.", "virgool.io", "namnak.com", "beytoote.com", "tebyan.net", "blogfa.com", "wikipedia.org", "aparat.com", "youtube.com", "instagram.com", "t.me"];
+const DIRECTORIES: &[&str] = &[
+    "esfahan.ir",
+    "parsbanfood",
+    "tejaratbazar",
+    "iranzamin",
+    "irandoc",
+    "bazarche",
+    "niazerooz",
+    "ependar",
+    "istgah.com",
+    "panakala",
+    "tjpco",
+    "pd() ",
+    "aradbranding",
+];
+const BLOGS: &[&str] = &[
+    "blog.",
+    "virgool.io",
+    "namnak.com",
+    "beytoote.com",
+    "tebyan.net",
+    "blogfa.com",
+    "wikipedia.org",
+    "aparat.com",
+    "youtube.com",
+    "instagram.com",
+    "t.me",
+];
 
 fn host(url: &str) -> String {
-    url.split("//").nth(1).unwrap_or("").split(['/', '?', '#']).next().unwrap_or("").trim_start_matches("www.").to_lowercase()
+    url.split("//")
+        .nth(1)
+        .unwrap_or("")
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or("")
+        .trim_start_matches("www.")
+        .to_lowercase()
 }
 
 /// B2B / wholesale cues in a page's text (and strong negatives). Used to tell a real supplier from a
 /// single retail listing.
 const B2B_POS: &[&str] = &[
-    "عمده", "فروش عمده", "قیمت عمده", "خرید عمده", "بنکداری", "بنکدار", "پخش", "پخش سراسری", "تأمین", "تامین کننده", "تامین‌کننده",
-    "تولیدکننده", "تولید کننده", "کارخانه", "کارخانجات", "صنایع", "واردکننده", "واردات", "نمایندگی", "نماینده", "همکاری", "قیمت همکاری",
-    "قیمت نمایندگی", "حداقل سفارش", "تیراژ", "فاکتور رسمی", "ارسال به سراسر", "انبار", "b2b", "moq", "wholesale", "عمده‌فروشی", "عمده فروشی",
+    "عمده",
+    "فروش عمده",
+    "قیمت عمده",
+    "خرید عمده",
+    "بنکداری",
+    "بنکدار",
+    "پخش",
+    "پخش سراسری",
+    "تأمین",
+    "تامین کننده",
+    "تامین‌کننده",
+    "تولیدکننده",
+    "تولید کننده",
+    "کارخانه",
+    "کارخانجات",
+    "صنایع",
+    "واردکننده",
+    "واردات",
+    "نمایندگی",
+    "نماینده",
+    "همکاری",
+    "قیمت همکاری",
+    "قیمت نمایندگی",
+    "حداقل سفارش",
+    "تیراژ",
+    "فاکتور رسمی",
+    "ارسال به سراسر",
+    "انبار",
+    "b2b",
+    "moq",
+    "wholesale",
+    "عمده‌فروشی",
+    "عمده فروشی",
 ];
 const B2B_NEG: &[&str] = &["افزودن به سبد", "add to cart", "خرید تکی", "گارانتی ۱۸ ماهه"];
 
@@ -152,7 +228,14 @@ pub fn classify_supplier(domain: &str, title: &str, text: &str) -> (SupplierKind
     if B2B_NEG.iter().any(|k| has(k)) && pos <= 1 {
         score -= 25;
     }
-    for (needle, label) in [("حداقل سفارش", "حداقل سفارش"), ("moq", "MOQ"), ("قیمت همکاری", "قیمت همکاری"), ("کاتالوگ", "کاتالوگ"), ("انبار", "انبار"), ("فاکتور رسمی", "فاکتور رسمی")] {
+    for (needle, label) in [
+        ("حداقل سفارش", "حداقل سفارش"),
+        ("moq", "MOQ"),
+        ("قیمت همکاری", "قیمت همکاری"),
+        ("کاتالوگ", "کاتالوگ"),
+        ("انبار", "انبار"),
+        ("فاکتور رسمی", "فاکتور رسمی"),
+    ] {
         if has(needle) {
             score += 6;
             signals.push(label.into());
@@ -179,10 +262,19 @@ pub fn classify_supplier(domain: &str, title: &str, text: &str) -> (SupplierKind
 /// Query expansion for B2B discovery (added to the user's product to find suppliers).
 pub fn b2b_queries(product: &str) -> Vec<String> {
     let p = product.trim();
-    ["قیمت عمده", "فروش عمده", "تولیدکننده", "کارخانه", "تأمین کننده", "پخش عمده", "نمایندگی", "قیمت همکاری"]
-        .iter()
-        .map(|suffix| format!("{p} {suffix}"))
-        .collect()
+    [
+        "قیمت عمده",
+        "فروش عمده",
+        "تولیدکننده",
+        "کارخانه",
+        "تأمین کننده",
+        "پخش عمده",
+        "نمایندگی",
+        "قیمت همکاری",
+    ]
+    .iter()
+    .map(|suffix| format!("{p} {suffix}"))
+    .collect()
 }
 
 /// A ready-to-send price-enquiry (RFQ) message for a supplier. Nothing is sent — the user copies it.
@@ -218,7 +310,10 @@ pub fn rfq_text(r: &Rfq) -> String {
         lines.push(format!("شرایط پرداخت: {}.", r.payment.trim()));
     }
     if !r.target_price.trim().is_empty() {
-        lines.push(format!("قیمت هدف ما حدود {} است؛ در صورت امکان بر همین مبنا پیشنهاد دهید.", r.target_price.trim()));
+        lines.push(format!(
+            "قیمت هدف ما حدود {} است؛ در صورت امکان بر همین مبنا پیشنهاد دهید.",
+            r.target_price.trim()
+        ));
     }
     if !r.lead_time.trim().is_empty() {
         wants.retain(|w| *w != "زمان تحویل");
@@ -289,7 +384,12 @@ fn str_of(o: &serde_json::Map<String, Value>, key: &str) -> String {
 fn price_of(offer: &serde_json::Map<String, Value>) -> i64 {
     let raw = ["price", "lowPrice", "highPrice"].iter().find_map(|k| match offer.get(*k) {
         Some(Value::Number(n)) => n.as_f64(),
-        Some(Value::String(s)) => crate::logic::ascii_digits(s).chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse().ok(),
+        Some(Value::String(s)) => crate::logic::ascii_digits(s)
+            .chars()
+            .filter(|c| c.is_ascii_digit())
+            .collect::<String>()
+            .parse()
+            .ok(),
         _ => None,
     });
     let Some(mut p) = raw.filter(|p| *p > 0.0) else { return 0 };
@@ -321,7 +421,10 @@ pub fn parse_product(html: &str) -> WebProduct {
             p.name = str_of(prod, "name");
             p.brand = str_of(prod, "brand");
             p.confidence = 70;
-            if let Some(off) = prod.get("offers").and_then(|o| find_type(o, "Offer").or_else(|| find_type(o, "AggregateOffer")).or_else(|| o.as_object())) {
+            if let Some(off) = prod
+                .get("offers")
+                .and_then(|o| find_type(o, "Offer").or_else(|| find_type(o, "AggregateOffer")).or_else(|| o.as_object()))
+            {
                 p.price = price_of(off);
                 let avail = str_of(off, "availability");
                 p.availability = availability_fa(&avail);
@@ -341,9 +444,18 @@ pub fn parse_product(html: &str) -> WebProduct {
     }
     if p.price == 0 {
         if let Some(pr) = meta_content(html, "product:price:amount").or_else(|| meta_content(html, "og:price:amount")) {
-            if let Ok(v) = crate::logic::ascii_digits(&pr).chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse::<f64>() {
+            if let Ok(v) = crate::logic::ascii_digits(&pr)
+                .chars()
+                .filter(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<f64>()
+            {
                 let cur = meta_content(html, "product:price:currency").unwrap_or_default().to_uppercase();
-                p.price = (if cur == "IRR" || cur.contains("RIAL") || (cur.is_empty() && v >= 5_000_000.0) { v / 10.0 } else { v }) as i64;
+                p.price = (if cur == "IRR" || cur.contains("RIAL") || (cur.is_empty() && v >= 5_000_000.0) {
+                    v / 10.0
+                } else {
+                    v
+                }) as i64;
                 p.confidence = p.confidence.max(55);
                 p.is_product = true;
             }
@@ -426,8 +538,12 @@ pub async fn results(page: &chromiumoxide::Page, query: &str, want: usize, token
         .map(|h| (relevance(query, &h.title, &h.url), h))
         .filter(|(r, _)| *r >= 50)
         .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
-    let now = crate::market::iso_utc(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64));
+    scored.sort_by_key(|(r, _)| std::cmp::Reverse(*r));
+    let now = crate::market::iso_utc(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as i64),
+    );
     let mut out = vec![];
     for (rel, h) in scored.into_iter().take(want) {
         if token.is_cancelled() {
@@ -472,7 +588,11 @@ pub fn supplier_from(domain: &str, title: &str, html: &str, url: &str, category:
     }
     let mut c = Contacts::default();
     extract_contacts(html, &mut c);
-    let now = crate::market::iso_utc(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64));
+    let now = crate::market::iso_utc(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as i64),
+    );
     Some(Supplier {
         name: title.trim().chars().take(80).collect(),
         kind: kind.fa().into(),
@@ -480,8 +600,16 @@ pub fn supplier_from(domain: &str, title: &str, html: &str, url: &str, category:
         website: format!("https://{domain}"),
         phone: c.landlines.first().or_else(|| c.mobiles.first()).cloned().unwrap_or_default(),
         email: c.emails.first().cloned().unwrap_or_default(),
-        social: [("اینستاگرام", &c.instagram), ("تلگرام", &c.telegram)].into_iter().filter(|(_, v)| !v.is_empty()).map(|(k, _)| k.to_string()).collect(),
-        moq: if norm(html).contains(&norm("حداقل سفارش")) { "دارد (در صفحه)".into() } else { String::new() },
+        social: [("اینستاگرام", &c.instagram), ("تلگرام", &c.telegram)]
+            .into_iter()
+            .filter(|(_, v)| !v.is_empty())
+            .map(|(k, _)| k.to_string())
+            .collect(),
+        moq: if norm(html).contains(&norm("حداقل سفارش")) {
+            "دارد (در صفحه)".into()
+        } else {
+            String::new()
+        },
         wholesale: true,
         terms: signals,
         confidence,
@@ -505,7 +633,11 @@ pub async fn suppliers(page: &chromiumoxide::Page, product: &str, token: &Cancel
         let hits = crate::websearch::search(page, &q, 1, token).await.unwrap_or_default();
         for h in hits.into_iter().take(6) {
             let domain = host(&h.url);
-            if domain.is_empty() || MARKETPLACES.iter().any(|m| domain.contains(m)) || BLOGS.iter().any(|b| domain.contains(b)) || DIRECTORIES.iter().any(|b| domain.contains(b)) {
+            if domain.is_empty()
+                || MARKETPLACES.iter().any(|m| domain.contains(m))
+                || BLOGS.iter().any(|b| domain.contains(b))
+                || DIRECTORIES.iter().any(|b| domain.contains(b))
+            {
                 continue;
             }
             if !seen.insert(domain.clone()) {
@@ -528,7 +660,7 @@ pub async fn suppliers(page: &chromiumoxide::Page, product: &str, token: &Cancel
         }
         tokio::time::sleep(Duration::from_millis(700)).await; // polite pacing
     }
-    out.sort_by(|a, b| b.confidence.cmp(&a.confidence));
+    out.sort_by_key(|s| std::cmp::Reverse(s.confidence));
     out
 }
 
@@ -564,7 +696,11 @@ mod tests {
 
     #[test]
     fn supplier_classification() {
-        let (k, score, sig) = classify_supplier("asalkhoonsar.ir", "تولید و پخش عسل", "فروش عمده مستقیم از کارخانه، قیمت همکاری و حداقل سفارش ۱۰ کیلو، فاکتور رسمی");
+        let (k, score, sig) = classify_supplier(
+            "asalkhoonsar.ir",
+            "تولید و پخش عسل",
+            "فروش عمده مستقیم از کارخانه، قیمت همکاری و حداقل سفارش ۱۰ کیلو، فاکتور رسمی",
+        );
         assert_eq!(k, SupplierKind::Manufacturer);
         assert!(score >= 60, "{score}");
         assert!(sig.iter().any(|s| s == "قیمت همکاری") && sig.iter().any(|s| s == "فاکتور رسمی"));
@@ -586,11 +722,21 @@ mod tests {
 
     #[test]
     fn rfq_message() {
-        let t = rfq_text(&Rfq { product: "عسل خوانسار".into(), quantity: "۵۰ کیلوگرم".into(), city: "اصفهان".into(), packaging: "سطل ۱ کیلویی".into(), ..Default::default() });
+        let t = rfq_text(&Rfq {
+            product: "عسل خوانسار".into(),
+            quantity: "۵۰ کیلوگرم".into(),
+            city: "اصفهان".into(),
+            packaging: "سطل ۱ کیلویی".into(),
+            ..Default::default()
+        });
         assert!(t.contains("عسل خوانسار") && t.contains("۵۰ کیلوگرم") && t.contains("اصفهان"));
         assert!(t.contains("قیمت همکاری/عمده") && t.contains("حداقل سفارش"));
         assert!(t.contains("سطل ۱ کیلویی"));
         // a near-empty request still produces a valid message
-        assert!(rfq_text(&Rfq { product: "زعفران".into(), ..Default::default() }).contains("زعفران"));
+        assert!(rfq_text(&Rfq {
+            product: "زعفران".into(),
+            ..Default::default()
+        })
+        .contains("زعفران"));
     }
 }

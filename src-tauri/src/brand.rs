@@ -163,7 +163,9 @@ pub struct MixItem {
 impl Db {
     pub fn brands(&self) -> Res<Vec<Brand>> {
         let c = self.c();
-        let mut st = c.prepare("SELECT id,name,own,website,instagram,category,note,report,analyzed_at FROM brands ORDER BY own DESC, id").map_err(err)?;
+        let mut st = c
+            .prepare("SELECT id,name,own,website,instagram,category,note,report,analyzed_at FROM brands ORDER BY own DESC, id")
+            .map_err(err)?;
         let rows = st
             .query_map([], |r| {
                 let rep: String = r.get(7)?;
@@ -192,7 +194,15 @@ impl Db {
         if !site.is_empty() && !site.contains('.') {
             return Err("آدرس سایت معتبر نیست؛ مثل example.ir".into());
         }
-        let ig = b.instagram.trim().trim_start_matches('@').trim_end_matches('/').rsplit('/').next().unwrap_or("").to_string();
+        let ig = b
+            .instagram
+            .trim()
+            .trim_start_matches('@')
+            .trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .unwrap_or("")
+            .to_string();
         let c = self.c();
         if b.own {
             c.execute("UPDATE brands SET own=0", []).map_err(err)?; // one «برند ما»
@@ -222,7 +232,11 @@ impl Db {
     pub fn brand_report_save(&self, id: i64, r: &BrandReport) -> Res<()> {
         let json = serde_json::to_string(r).map_err(err)?;
         let c = self.c();
-        c.execute("UPDATE brands SET report=?1, analyzed_at=datetime('now','localtime') WHERE id=?2", rusqlite::params![json, id]).map_err(err)?;
+        c.execute(
+            "UPDATE brands SET report=?1, analyzed_at=datetime('now','localtime') WHERE id=?2",
+            rusqlite::params![json, id],
+        )
+        .map_err(err)?;
         c.execute(
             "INSERT INTO brand_runs(brand_id,name,overall,report) SELECT id,name,?1,?2 FROM brands WHERE id=?3",
             rusqlite::params![r.overall.round() as i64, json, id],
@@ -234,13 +248,20 @@ impl Db {
     /// Every brand analysis, newest first: (run id, brand id, name, overall score, at).
     pub fn brand_runs(&self, limit: i64) -> Res<Vec<BrandRunRow>> {
         let c = self.c();
-        let mut st = c.prepare("SELECT id,brand_id,name,overall,created_at FROM brand_runs ORDER BY id DESC LIMIT ?1").map_err(err)?;
-        let rows = st.query_map([limit], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))).map_err(err)?;
+        let mut st = c
+            .prepare("SELECT id,brand_id,name,overall,created_at FROM brand_runs ORDER BY id DESC LIMIT ?1")
+            .map_err(err)?;
+        let rows = st
+            .query_map([limit], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+            .map_err(err)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(err)
     }
 
     pub fn brand_run_get(&self, id: i64) -> Res<BrandReport> {
-        let raw: String = self.c().query_row("SELECT report FROM brand_runs WHERE id=?1", [id], |r| r.get(0)).map_err(err)?;
+        let raw: String = self
+            .c()
+            .query_row("SELECT report FROM brand_runs WHERE id=?1", [id], |r| r.get(0))
+            .map_err(err)?;
         serde_json::from_str(&raw).map_err(err)
     }
 
@@ -267,13 +288,21 @@ fn http() -> reqwest::Client {
 pub async fn audit_site(url: &str) -> Site {
     let url = url.trim();
     if url.is_empty() {
-        return Site { error: "سایت ثبت نشده".into(), ..Default::default() };
+        return Site {
+            error: "سایت ثبت نشده".into(),
+            ..Default::default()
+        };
     }
     let full = if url.starts_with("http") { url.to_string() } else { format!("https://{url}") };
     let t = Instant::now();
     let r = match http().get(&full).send().await {
         Ok(r) => r,
-        Err(e) => return Site { error: format!("سایت باز نشد: {}", e.without_url()), ..Default::default() },
+        Err(e) => {
+            return Site {
+                error: format!("سایت باز نشد: {}", e.without_url()),
+                ..Default::default()
+            }
+        }
     };
     let https = r.url().scheme() == "https";
     let ok = r.status().is_success();
@@ -281,11 +310,20 @@ pub async fn audit_site(url: &str) -> Site {
     let ms = t.elapsed().as_millis() as u64;
     let low = body.to_lowercase();
     let title = crate::logic::html_unescape(
-        low.find("<title").and_then(|i| body[i..].find('>').map(|j| i + j + 1)).and_then(|s| body[s..].find("</").map(|e| body[s..s + e].trim().to_string())).unwrap_or_default().as_str(),
+        low.find("<title")
+            .and_then(|i| body[i..].find('>').map(|j| i + j + 1))
+            .and_then(|s| body[s..].find("</").map(|e| body[s..s + e].trim().to_string()))
+            .unwrap_or_default()
+            .as_str(),
     );
     let mut c = crate::logic::Contacts::default();
     crate::logic::extract_contacts(&body, &mut c);
-    let socials: Vec<String> = c.pairs().into_iter().filter(|(k, _)| !matches!(*k, "mobile" | "landline" | "email")).map(|(k, _)| k.to_string()).collect();
+    let socials: Vec<String> = c
+        .pairs()
+        .into_iter()
+        .filter(|(k, _)| !matches!(*k, "mobile" | "landline" | "email"))
+        .map(|(k, _)| k.to_string())
+        .collect();
     Site {
         ok,
         https,
@@ -311,7 +349,13 @@ pub fn parse_counts(desc: &str) -> (Option<i64>, Option<i64>) {
                 return None;
             }
             let t = w[0].to_lowercase();
-            let (n, mul) = if let Some(x) = t.strip_suffix('k') { (x, 1_000.0) } else if let Some(x) = t.strip_suffix('m') { (x, 1_000_000.0) } else { (t.as_str(), 1.0) };
+            let (n, mul) = if let Some(x) = t.strip_suffix('k') {
+                (x, 1_000.0)
+            } else if let Some(x) = t.strip_suffix('m') {
+                (x, 1_000_000.0)
+            } else {
+                (t.as_str(), 1.0)
+            };
             n.parse::<f64>().ok().map(|v| (v * mul).round() as i64)
         })
     };
@@ -320,7 +364,10 @@ pub fn parse_counts(desc: &str) -> (Option<i64>, Option<i64>) {
 
 pub async fn read_instagram(handle: &str) -> Social {
     let h = handle.trim().trim_start_matches('@');
-    let mut s = Social { handle: h.to_string(), ..Default::default() };
+    let mut s = Social {
+        handle: h.to_string(),
+        ..Default::default()
+    };
     if h.is_empty() {
         return s;
     }
@@ -345,14 +392,21 @@ pub fn market_of(name: &str, category: &str, runs: &[Report]) -> Market {
         .filter(|r| r.brand.is_empty() && (cat.is_empty() || words(&r.query).join(" ").contains(&cat) || cat.contains(&words(&r.query).join(" "))))
         .filter(|r| seen.insert(words(&r.query).join(" ")))
         .collect();
-    let mut m = Market { searches: runs.len(), ..Default::default() };
+    let mut m = Market {
+        searches: runs.len(),
+        ..Default::default()
+    };
     let (mut total, mut mine, mut idx, mut idx_n) = (0usize, 0usize, 0.0f64, 0.0f64);
     let mut prices = vec![];
     let (mut rsum, mut rn) = (0.0f64, 0.0f64);
     for r in &runs {
         total += r.offers.len();
         let basis = |o: &crate::market::Offer| if r.stats.basis == "per_kg" { o.unit_price.unwrap_or(0) } else { o.price };
-        let ours: Vec<_> = r.offers.iter().filter(|o| words(&o.brand).join(" ") == key || words(&o.title).join(" ").contains(&key)).collect();
+        let ours: Vec<_> = r
+            .offers
+            .iter()
+            .filter(|o| words(&o.brand).join(" ") == key || words(&o.title).join(" ").contains(&key))
+            .collect();
         mine += ours.len();
         for o in &ours {
             if !m.platforms.contains(&o.platform) {
@@ -373,7 +427,11 @@ pub fn market_of(name: &str, category: &str, runs: &[Report]) -> Market {
         m.market_median = r.stats.median;
     }
     m.offers = mine;
-    m.share_pct = if total > 0 { (mine as f64 * 1000.0 / total as f64).round() / 10.0 } else { 0.0 };
+    m.share_pct = if total > 0 {
+        (mine as f64 * 1000.0 / total as f64).round() / 10.0
+    } else {
+        0.0
+    };
     prices.sort_unstable();
     m.median = prices.get(prices.len() / 2).copied().unwrap_or(0);
     m.price_index = if idx_n > 0.0 { (idx / idx_n).round() } else { 0.0 };
@@ -392,7 +450,9 @@ pub fn market_of(name: &str, category: &str, runs: &[Report]) -> Market {
 
 pub fn score(m: Market, site: Site, insta: Social, has_site: bool) -> BrandReport {
     let presence = (m.searches > 0).then(|| (m.share_pct * 3.0 + m.platforms.len() as f64 * 12.0).min(100.0).round());
-    let quality = m.rating.map(|r| ((r / 5.0) * 85.0 + ((m.reviews as f64 + 1.0).log10() / 3.0).min(1.0) * 15.0).round());
+    let quality = m
+        .rating
+        .map(|r| ((r / 5.0) * 85.0 + ((m.reviews as f64 + 1.0).log10() / 3.0).min(1.0) * 15.0).round());
     let digital = has_site.then(|| {
         let mut s = 0.0;
         if site.ok {
@@ -422,9 +482,17 @@ pub fn score(m: Market, site: Site, insta: Social, has_site: bool) -> BrandRepor
         }
         s
     });
-    let social = insta.followers.map(|f| (((f as f64 + 1.0).log10() / 6.0) * 90.0 + if insta.posts.unwrap_or(0) >= 50 { 10.0 } else { 0.0 }).min(100.0).round());
+    let social = insta.followers.map(|f| {
+        (((f as f64 + 1.0).log10() / 6.0) * 90.0 + if insta.posts.unwrap_or(0) >= 50 { 10.0 } else { 0.0 })
+            .min(100.0)
+            .round()
+    });
     let pillars: Vec<f64> = [presence, quality, digital, social].into_iter().flatten().collect();
-    let overall = if pillars.is_empty() { 0.0 } else { (pillars.iter().sum::<f64>() / pillars.len() as f64).round() };
+    let overall = if pillars.is_empty() {
+        0.0
+    } else {
+        (pillars.iter().sum::<f64>() / pillars.len() as f64).round()
+    };
 
     let (mut strengths, mut weaknesses, mut actions) = (vec![], vec![], vec![]);
     match presence {
@@ -443,7 +511,9 @@ pub fn score(m: Market, site: Site, insta: Social, has_site: bool) -> BrandRepor
         Some(r) if r >= 4.3 => strengths.push(format!("رضایت بالای خریداران: میانگین {r} از ۵ ({} نظر).", m.reviews)),
         Some(r) if r < 3.8 => {
             weaknesses.push(format!("امتیاز خریداران پایین است ({r} از ۵)."));
-            actions.push("نظرهای منفی را دسته‌بندی کنید (کیفیت، بسته‌بندی، ارسال) و ریشه پرتکرارترین را اول حل کنید؛ بعد از خرید از مشتری راضی بخواهید نظر بدهد.".into());
+            actions.push(
+                "نظرهای منفی را دسته‌بندی کنید (کیفیت، بسته‌بندی، ارسال) و ریشه پرتکرارترین را اول حل کنید؛ بعد از خرید از مشتری راضی بخواهید نظر بدهد.".into(),
+            );
         }
         Some(_) => actions.push("برای رسیدن به امتیاز ۴٫۳+ پیگیری پس از فروش و پاسخ به نظرها را منظم کنید.".into()),
         None => {}
@@ -491,32 +561,95 @@ pub fn score(m: Market, site: Site, insta: Social, has_site: bool) -> BrandRepor
         None if !insta.handle.is_empty() => actions.push("اطلاعات عمومی پیج اینستاگرام خوانده نشد؛ مطمئن شوید پیج عمومی و کسب‌وکاری است.".into()),
         _ => {}
     }
-    BrandReport { presence, quality, digital, social, overall, market: m, site, insta, strengths, weaknesses, actions, ..Default::default() }
+    BrandReport {
+        presence,
+        quality,
+        digital,
+        social,
+        overall,
+        market: m,
+        site,
+        insta,
+        strengths,
+        weaknesses,
+        actions,
+        ..Default::default()
+    }
 }
 
 /// Domains that are not a brand's own website.
 const NOT_OWN_SITE: &[&str] = &[
-    "torob.", "digikala.", "basalam.", "divar.", "sheypoor.", "emalls.", "instagram.", "t.me", "telegram.", "aparat.", "youtube.", "wikipedia.",
-    "google.", "bing.", "facebook.", "twitter.", "x.com", "linkedin.", "snapp", "timcheh.", "digistyle.", "okala.", "esam.", "neshan.", "balad.",
-    "eitaa.", "rubika.", "virgool.", "namnak.", "beytoote.", "tebyan.", "blogfa.", "pinterest.", "tiktok.",
+    "torob.",
+    "digikala.",
+    "basalam.",
+    "divar.",
+    "sheypoor.",
+    "emalls.",
+    "instagram.",
+    "t.me",
+    "telegram.",
+    "aparat.",
+    "youtube.",
+    "wikipedia.",
+    "google.",
+    "bing.",
+    "facebook.",
+    "twitter.",
+    "x.com",
+    "linkedin.",
+    "snapp",
+    "timcheh.",
+    "digistyle.",
+    "okala.",
+    "esam.",
+    "neshan.",
+    "balad.",
+    "eitaa.",
+    "rubika.",
+    "virgool.",
+    "namnak.",
+    "beytoote.",
+    "tebyan.",
+    "blogfa.",
+    "pinterest.",
+    "tiktok.",
 ];
 
 fn host(url: &str) -> String {
-    url.split("//").nth(1).unwrap_or(url).split('/').next().unwrap_or("").trim_start_matches("www.").to_lowercase()
+    url.split("//")
+        .nth(1)
+        .unwrap_or(url)
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .trim_start_matches("www.")
+        .to_lowercase()
 }
 
 /// The brand's own website and Instagram page, found by searching its name (Bing in the app's
 /// own browser; a «robot» check is handed to the user in a visible window).
-pub async fn discover(s: &crate::scanner::Settings, profile: &std::path::Path, b: &Brand, token: &tokio_util::sync::CancellationToken, emit: crate::scanner::Emit<'_>) -> (String, String) {
+pub async fn discover(
+    s: &crate::scanner::Settings,
+    profile: &std::path::Path,
+    b: &Brand,
+    token: &tokio_util::sync::CancellationToken,
+    emit: crate::scanner::Emit<'_>,
+) -> (String, String) {
     let (mut site, mut insta) = (b.website.trim().to_string(), b.instagram.trim().trim_start_matches('@').to_string());
     // offline tests point the market at a local mock and have no web search to ask
     let offline = crate::logic::test_seam("HAMISTA_MARKET_BASE").is_some() && crate::logic::test_seam("HAMISTA_SEARCH_BASE").is_none();
     if (!site.is_empty() && !insta.is_empty()) || offline {
         return (site, insta);
     }
-    let Ok(eng) = crate::scanner::launch(s, profile, s.headless, 0).await else { return (site, insta) };
+    let Ok(eng) = crate::scanner::launch(s, profile, s.headless, 0).await else {
+        return (site, insta);
+    };
     let name = b.name.trim();
-    let extra = if b.category.trim().is_empty() { String::new() } else { format!(" {}", b.category.trim()) };
+    let extra = if b.category.trim().is_empty() {
+        String::new()
+    } else {
+        format!(" {}", b.category.trim())
+    };
     if site.is_empty() {
         crate::scanner::status(emit, format!("پیدا کردن سایت «{name}»…"));
         if let Ok(hits) = crate::websearch::search_attended(&eng.list, s, profile, &format!("{name}{extra} سایت رسمی"), 1, token, emit).await {
@@ -538,7 +671,12 @@ pub async fn discover(s: &crate::scanner::Settings, profile: &std::path::Path, b
             insta = hits
                 .iter()
                 .filter(|h| host(&h.url).contains("instagram.com"))
-                .filter_map(|h| h.url.split("instagram.com/").nth(1).map(|p| p.split(['/', '?']).next().unwrap_or("").to_string()))
+                .filter_map(|h| {
+                    h.url
+                        .split("instagram.com/")
+                        .nth(1)
+                        .map(|p| p.split(['/', '?']).next().unwrap_or("").to_string())
+                })
                 .find(|hd| !hd.is_empty() && !["p", "reel", "reels", "explore", "stories", "tv", "accounts"].contains(&hd.as_str()))
                 .unwrap_or_default();
         }
@@ -579,7 +717,14 @@ pub fn enrich(r: &mut BrandReport, name: &str, mine: Option<&Report>, category: 
             let mut sellers: Vec<&str> = os.iter().map(|o| o.seller.as_str()).filter(|x| !x.is_empty()).collect();
             sellers.sort_unstable();
             sellers.dedup();
-            Channel { platform, offers: os.len(), sellers: sellers.len(), min: ps[0], median: pct_of(&ps, 0.5), max: *ps.last().unwrap_or(&0) }
+            Channel {
+                platform,
+                offers: os.len(),
+                sellers: sellers.len(),
+                min: ps[0],
+                median: pct_of(&ps, 0.5),
+                max: *ps.last().unwrap_or(&0),
+            }
         })
         .collect();
     r.channels.sort_by_key(|c| std::cmp::Reverse(c.offers));
@@ -588,28 +733,44 @@ pub fn enrich(r: &mut BrandReport, name: &str, mine: Option<&Report>, category: 
     r.price_min = prices.first().copied().unwrap_or(0);
     r.price_max = prices.last().copied().unwrap_or(0);
     let mut sellers: std::collections::HashMap<String, usize> = Default::default();
-    offers.iter().filter(|o| !o.seller.is_empty()).for_each(|o| *sellers.entry(o.seller.clone()).or_default() += 1);
+    offers
+        .iter()
+        .filter(|o| !o.seller.is_empty())
+        .for_each(|o| *sellers.entry(o.seller.clone()).or_default() += 1);
     r.sellers = sellers.len();
     let mut top: Vec<(String, usize)> = sellers.into_iter().collect();
     top.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     top.truncate(6);
     r.top_sellers = top;
     let mut prod: Vec<crate::market::Offer> = offers.iter().map(|o| (*o).clone()).collect();
-    prod.sort_by(|a, b| b.reviews.cmp(&a.reviews).then_with(|| b.value.partial_cmp(&a.value).unwrap_or(std::cmp::Ordering::Equal)));
+    prod.sort_by(|a, b| {
+        b.reviews
+            .cmp(&a.reviews)
+            .then_with(|| b.value.partial_cmp(&a.value).unwrap_or(std::cmp::Ordering::Equal))
+    });
     prod.dedup_by(|a, b| words(&a.title) == words(&b.title));
     prod.truncate(12);
     r.products = prod;
     r.lines = mine.map(|m| m.subcategories.iter().take(8).cloned().collect()).unwrap_or_default();
     if let Some(c) = category {
         r.category_run = c.id;
-        r.competitors = c.brands.iter().filter(|b| b.name != "سایر / بدون برند" && crate::market::brand_key(&b.name) != key).take(8).cloned().collect();
+        r.competitors = c
+            .brands
+            .iter()
+            .filter(|b| b.name != "سایر / بدون برند" && crate::market::brand_key(&b.name) != key)
+            .take(8)
+            .cloned()
+            .collect();
     }
 
     // ---- 4P marketing mix ----
     let product_score = r.quality.map(|q| (q * 0.7 + (r.lines.len().min(6) as f64 / 6.0) * 30.0).round());
     let mut product = vec![];
     if !r.lines.is_empty() {
-        product.push(format!("خطوط محصول دیده‌شده: {}.", r.lines.iter().take(5).cloned().collect::<Vec<_>>().join("، ")));
+        product.push(format!(
+            "خطوط محصول دیده‌شده: {}.",
+            r.lines.iter().take(5).cloned().collect::<Vec<_>>().join("، ")
+        ));
     }
     product.push(match r.market.rating {
         Some(x) => format!("کیفیت درک‌شده از نگاه خریدار: {x} از ۵ ({} نظر).", r.market.reviews),
@@ -623,12 +784,20 @@ pub fn enrich(r: &mut BrandReport, name: &str, mine: Option<&Report>, category: 
     });
     let mut price = vec![];
     if r.market.price_index > 0.0 {
-        price.push(format!("شاخص قیمت {} (۱۰۰ = میانه بازار) — جایگاه «{}».", r.market.price_index, if r.market.tier.is_empty() { "—" } else { &r.market.tier }));
+        price.push(format!(
+            "شاخص قیمت {} (۱۰۰ = میانه بازار) — جایگاه «{}».",
+            r.market.price_index,
+            if r.market.tier.is_empty() { "—" } else { &r.market.tier }
+        ));
     }
     if r.price_min > 0 {
         price.push(format!("بازه قیمت فروش برند: {} تا {} تومان.", r.price_min, r.price_max));
     }
-    let place_score = (!r.channels.is_empty() || r.market.searches > 0).then(|| ((r.channels.len() as f64 * 18.0) + (r.sellers.min(20) as f64 * 2.0) + r.market.share_pct.min(20.0)).min(100.0).round());
+    let place_score = (!r.channels.is_empty() || r.market.searches > 0).then(|| {
+        ((r.channels.len() as f64 * 18.0) + (r.sellers.min(20) as f64 * 2.0) + r.market.share_pct.min(20.0))
+            .min(100.0)
+            .round()
+    });
     let mut place = vec![];
     if r.channels.is_empty() {
         place.push("در فروشگاه‌های اینترنتی بررسی‌شده کالایی با این برند پیدا نشد.".into());
@@ -638,23 +807,47 @@ pub fn enrich(r: &mut BrandReport, name: &str, mine: Option<&Report>, category: 
     let promo: Vec<f64> = [r.digital, r.social].into_iter().flatten().collect();
     let promo_score = (!promo.is_empty()).then(|| (promo.iter().sum::<f64>() / promo.len() as f64).round());
     let mut promotion = vec![];
-    promotion.push(if r.site.ok { "سایت رسمی فعال است.".to_string() } else { "سایت رسمی فعالی پیدا نشد.".to_string() });
+    promotion.push(if r.site.ok {
+        "سایت رسمی فعال است.".to_string()
+    } else {
+        "سایت رسمی فعالی پیدا نشد.".to_string()
+    });
     if let Some(f) = r.insta.followers {
         promotion.push(format!("اینستاگرام @{}: {} دنبال‌کننده.", r.insta.handle, f));
     }
     r.mix = vec![
-        MixItem { key: "product".into(), score: product_score, notes: product },
-        MixItem { key: "price".into(), score: price_score, notes: price },
-        MixItem { key: "place".into(), score: place_score, notes: place },
-        MixItem { key: "promotion".into(), score: promo_score, notes: promotion },
+        MixItem {
+            key: "product".into(),
+            score: product_score,
+            notes: product,
+        },
+        MixItem {
+            key: "price".into(),
+            score: price_score,
+            notes: price,
+        },
+        MixItem {
+            key: "place".into(),
+            score: place_score,
+            notes: place,
+        },
+        MixItem {
+            key: "promotion".into(),
+            score: promo_score,
+            notes: promotion,
+        },
     ];
 
     // ---- opportunities & threats ----
     if let Some(c) = category {
         for ch in c.channels.iter().filter(|ch| ch.pct >= 15.0) {
-            let present = r.channels.iter().any(|x| crate::market::platform(&x.platform).map_or(x.platform.as_str(), |p| p.name) == ch.name);
+            let present = r
+                .channels
+                .iter()
+                .any(|x| crate::market::platform(&x.platform).map_or(x.platform.as_str(), |p| p.name) == ch.name);
             if !present {
-                r.opportunities.push(format!("«{}» {}٪ از عرضه این بازار را دارد و برند شما آنجا نیست.", ch.name, ch.pct));
+                r.opportunities
+                    .push(format!("«{}» {}٪ از عرضه این بازار را دارد و برند شما آنجا نیست.", ch.name, ch.pct));
             }
         }
         if let (Some(rating), true) = (r.market.rating, r.market.price_index > 0.0) {
@@ -662,20 +855,26 @@ pub fn enrich(r: &mut BrandReport, name: &str, mine: Option<&Report>, category: 
                 r.opportunities.push("کیفیت درک‌شده بالاتر از قیمت است؛ جای افزایش تدریجی قیمت هست.".into());
             }
         }
-        if let Some(lead) = c.brands.iter().find(|b| b.name != "سایر / بدون برند" && crate::market::brand_key(&b.name) != key) {
+        if let Some(lead) = c
+            .brands
+            .iter()
+            .find(|b| b.name != "سایر / بدون برند" && crate::market::brand_key(&b.name) != key)
+        {
             if lead.pct > r.market.share_pct * 2.0 && lead.pct >= 10.0 {
                 r.threats.push(format!("«{}» با {}٪ از عرضه‌ها رهبر این بازار است.", lead.name, lead.pct));
             }
         }
     }
     if spread >= 2.5 {
-        r.threats.push("اختلاف زیاد قیمت برند بین فروشندگان (بیش از ۲٫۵ برابر): نشانه تضاد کانال یا کالای تقلبی/قدیمی؛ قیمت‌گذاری کانال‌ها را هماهنگ کنید.".into());
+        r.threats
+            .push("اختلاف زیاد قیمت برند بین فروشندگان (بیش از ۲٫۵ برابر): نشانه تضاد کانال یا کالای تقلبی/قدیمی؛ قیمت‌گذاری کانال‌ها را هماهنگ کنید.".into());
     }
     if r.market.reviews < 20 && !offers.is_empty() {
         r.threats.push("تعداد نظرهای خریداران کم است؛ اعتماد خریدار تازه سخت‌تر جلب می‌شود.".into());
     }
     if r.channels.len() == 1 {
-        r.threats.push("وابستگی به یک کانال فروش: تغییر سیاست همان پلتفرم کل فروش را تحت تأثیر می‌گذارد.".into());
+        r.threats
+            .push("وابستگی به یک کانال فروش: تغییر سیاست همان پلتفرم کل فروش را تحت تأثیر می‌گذارد.".into());
     }
     assess(r, &offers);
 }
@@ -696,14 +895,34 @@ fn assess(r: &mut BrandReport, offers: &[&crate::market::Offer]) {
     let freshness = if offers.is_empty() && r.market.searches == 0 { 30 } else { 85 };
     let digital = r.digital.map_or(20.0, |d| d) as i64;
     let signals = vec![
-        Signal { key: "coverage".into(), label: "پوشش منابع".into(), score: coverage },
-        Signal { key: "sample".into(), label: "حجم داده".into(), score: sample },
-        Signal { key: "entity".into(), label: "تطبیق هویت برند".into(), score: entity },
-        Signal { key: "freshness".into(), label: "تازگی داده".into(), score: freshness },
-        Signal { key: "digital".into(), label: "حضور دیجیتال".into(), score: digital },
+        Signal {
+            key: "coverage".into(),
+            label: "پوشش منابع".into(),
+            score: coverage,
+        },
+        Signal {
+            key: "sample".into(),
+            label: "حجم داده".into(),
+            score: sample,
+        },
+        Signal {
+            key: "entity".into(),
+            label: "تطبیق هویت برند".into(),
+            score: entity,
+        },
+        Signal {
+            key: "freshness".into(),
+            label: "تازگی داده".into(),
+            score: freshness,
+        },
+        Signal {
+            key: "digital".into(),
+            label: "حضور دیجیتال".into(),
+            score: digital,
+        },
     ];
     // confidence weights coverage and entity match the most
-    let w: &[(i64, f64)] = &[(coverage, 1.2), (sample, 1.0), (entity, 1.3), (freshness as i64, 0.8), (digital, 0.7)];
+    let w: &[(i64, f64)] = &[(coverage, 1.2), (sample, 1.0), (entity, 1.3), (freshness, 0.8), (digital, 0.7)];
     let sum: f64 = w.iter().map(|(v, k)| *v as f64 * k).sum();
     let wsum: f64 = w.iter().map(|(_, k)| k).sum();
     r.confidence = clamp(sum / wsum);
@@ -711,16 +930,32 @@ fn assess(r: &mut BrandReport, offers: &[&crate::market::Offer]) {
 
     let mut ev = vec![];
     if r.market.median > 0 {
-        ev.push(Evidence { fact: format!("میانه قیمت برند: {} تومان", r.market.median), source: "بازار فروشگاه‌های اینترنتی".into(), url: String::new() });
+        ev.push(Evidence {
+            fact: format!("میانه قیمت برند: {} تومان", r.market.median),
+            source: "بازار فروشگاه‌های اینترنتی".into(),
+            url: String::new(),
+        });
     }
     if let Some(first) = offers.iter().find(|o| !o.url.is_empty()) {
-        ev.push(Evidence { fact: format!("یک کالای برند: «{}»", first.title), source: crate::market::platform(&first.platform).map_or("فروشگاه", |p| p.name).into(), url: first.url.clone() });
+        ev.push(Evidence {
+            fact: format!("یک کالای برند: «{}»", first.title),
+            source: crate::market::platform(&first.platform).map_or("فروشگاه", |p| p.name).into(),
+            url: first.url.clone(),
+        });
     }
     if r.site.ok {
-        ev.push(Evidence { fact: "سایت رسمی فعال".into(), source: "وب".into(), url: String::new() });
+        ev.push(Evidence {
+            fact: "سایت رسمی فعال".into(),
+            source: "وب".into(),
+            url: String::new(),
+        });
     }
     if let Some(f) = r.insta.followers {
-        ev.push(Evidence { fact: format!("اینستاگرام: {f} دنبال‌کننده"), source: "اینستاگرام عمومی".into(), url: format!("https://instagram.com/{}", r.insta.handle) });
+        ev.push(Evidence {
+            fact: format!("اینستاگرام: {f} دنبال‌کننده"),
+            source: "اینستاگرام عمومی".into(),
+            url: format!("https://instagram.com/{}", r.insta.handle),
+        });
     }
     r.evidence = ev;
 }
@@ -745,18 +980,60 @@ pub async fn analyze(
         let _ = db.brand_save(&nb);
     }
     // live market: the category as a whole (share, competitors) and the brand's own products
-    let base = crate::market::MarketReq { platforms: vec!["torob".into(), "digikala".into(), "basalam".into()], limit: 60, ..Default::default() };
+    let base = crate::market::MarketReq {
+        platforms: vec!["torob".into(), "digikala".into(), "basalam".into()],
+        limit: 60,
+        ..Default::default()
+    };
     let category = if b.category.trim().is_empty() || token.is_cancelled() {
         None
     } else {
-        crate::market::search(db, s, profile, &crate::market::MarketReq { query: b.category.trim().into(), ..base.clone() }, token, emit).await.ok()
+        crate::market::search(
+            db,
+            s,
+            profile,
+            &crate::market::MarketReq {
+                query: b.category.trim().into(),
+                ..base.clone()
+            },
+            token,
+            emit,
+        )
+        .await
+        .ok()
     };
     let mine = if token.is_cancelled() {
         None
     } else if b.category.trim().is_empty() {
-        crate::market::search(db, s, profile, &crate::market::MarketReq { query: b.name.trim().into(), exact: false, ..base.clone() }, token, emit).await.ok()
+        crate::market::search(
+            db,
+            s,
+            profile,
+            &crate::market::MarketReq {
+                query: b.name.trim().into(),
+                exact: false,
+                ..base.clone()
+            },
+            token,
+            emit,
+        )
+        .await
+        .ok()
     } else {
-        crate::market::search(db, s, profile, &crate::market::MarketReq { query: b.category.trim().into(), brand: b.name.trim().into(), ..base.clone() }, token, emit).await.ok()
+        crate::market::search(
+            db,
+            s,
+            profile,
+            &crate::market::MarketReq {
+                query: b.category.trim().into(),
+                brand: b.name.trim().into(),
+                ..base.clone()
+            },
+            token,
+            emit,
+        )
+        .await
+        .ok()
     };
     crate::scanner::status(emit, "بررسی سایت و صفحه اینستاگرام…");
     let runs = db.market_recent(60)?;
@@ -786,7 +1063,11 @@ pub fn candidates(name: &str, mine: Option<&Report>) -> Vec<Candidate> {
     for o in &m.offers {
         for (cand, kind, url) in [
             (o.brand.as_str(), "برند", o.url.as_str()),
-            (o.seller.as_str(), "غرفه / فروشنده", if o.seller_url.is_empty() { o.url.as_str() } else { o.seller_url.as_str() }),
+            (
+                o.seller.as_str(),
+                "غرفه / فروشنده",
+                if o.seller_url.is_empty() { o.url.as_str() } else { o.seller_url.as_str() },
+            ),
         ] {
             let cand = cand.trim();
             if cand.len() < 2 {
@@ -810,7 +1091,7 @@ pub fn candidates(name: &str, mine: Option<&Report>) -> Vec<Candidate> {
             });
         }
     }
-    out.sort_by(|a, b| b.score.cmp(&a.score));
+    out.sort_by_key(|c| std::cmp::Reverse(c.score));
     out.truncate(3);
     out
 }
@@ -822,10 +1103,34 @@ mod tests {
 
     #[test]
     fn marketing_mix() {
-        let o = |t: &str, p: i64, plat: &str, seller: &str| Offer { title: t.into(), price: p, platform: plat.into(), seller: seller.into(), rating: Some(4.5), reviews: 50, ..Default::default() };
-        let cat = market("عسل", "", vec![o("عسل خوانسار گون", 300_000, "torob", "الف"), o("عسل خوانسار کنار", 320_000, "digikala", "ب"), o("عسل سبلان", 200_000, "basalam", "ج"), o("عسل سبلان آویشن", 210_000, "basalam", "د"), o("عسل سبلان گون", 220_000, "basalam", "ه")], 25.0);
+        let o = |t: &str, p: i64, plat: &str, seller: &str| Offer {
+            title: t.into(),
+            price: p,
+            platform: plat.into(),
+            seller: seller.into(),
+            rating: Some(4.5),
+            reviews: 50,
+            ..Default::default()
+        };
+        let cat = market(
+            "عسل",
+            "",
+            vec![
+                o("عسل خوانسار گون", 300_000, "torob", "الف"),
+                o("عسل خوانسار کنار", 320_000, "digikala", "ب"),
+                o("عسل سبلان", 200_000, "basalam", "ج"),
+                o("عسل سبلان آویشن", 210_000, "basalam", "د"),
+                o("عسل سبلان گون", 220_000, "basalam", "ه"),
+            ],
+            25.0,
+        );
         let mine = market("عسل", "خوانسار", cat.offers.clone(), 25.0);
-        let mut r = score(market_of("خوانسار", "عسل", std::slice::from_ref(&cat)), Site::default(), Social::default(), false);
+        let mut r = score(
+            market_of("خوانسار", "عسل", std::slice::from_ref(&cat)),
+            Site::default(),
+            Social::default(),
+            false,
+        );
         enrich(&mut r, "خوانسار", Some(&mine), Some(&cat));
         assert_eq!(r.channels.len(), 2);
         assert_eq!((r.price_min, r.price_max, r.sellers), (300_000, 320_000, 2));
@@ -840,9 +1145,20 @@ mod tests {
 
     #[test]
     fn candidate_resolution() {
-        let o = |t: &str, plat: &str, seller: &str| Offer { title: t.into(), price: 300_000, platform: plat.into(), seller: seller.into(), ..Default::default() };
+        let o = |t: &str, plat: &str, seller: &str| Offer {
+            title: t.into(),
+            price: 300_000,
+            platform: plat.into(),
+            seller: seller.into(),
+            ..Default::default()
+        };
         // «شهد آزادی» appears as a booth name and a brand → both become candidates, a stranger does not
-        let m = market("عسل", "", vec![o("عسل شهد آزادی طبیعی", "basalam", "غرفه شهد آزادی"), o("عسل سبلان", "torob", "فروشگاه الف")], 25.0);
+        let m = market(
+            "عسل",
+            "",
+            vec![o("عسل شهد آزادی طبیعی", "basalam", "غرفه شهد آزادی"), o("عسل سبلان", "torob", "فروشگاه الف")],
+            25.0,
+        );
         let c = candidates("شهد آزادی", Some(&m));
         assert!(!c.is_empty(), "the booth/brand «شهد آزادی» should be a candidate");
         assert!(c.iter().all(|x| x.name.contains("شهد") || x.name.contains("آزادی")));
@@ -851,20 +1167,60 @@ mod tests {
 
     #[test]
     fn counts() {
-        assert_eq!(parse_counts("12.5K Followers, 300 Following, 1,204 Posts - See Instagram photos"), (Some(12_500), Some(1204)));
+        assert_eq!(
+            parse_counts("12.5K Followers, 300 Following, 1,204 Posts - See Instagram photos"),
+            (Some(12_500), Some(1204))
+        );
         assert_eq!(parse_counts("۲٬۳۰۰ دنبال‌کننده، ۱۲۰ پست"), (Some(2300), Some(120)));
         assert_eq!(parse_counts("nothing"), (None, None));
     }
 
     #[test]
     fn scoring() {
-        let o = |t: &str, p: i64, r: f64, plat: &str| Offer { platform: plat.into(), title: t.into(), price: p, rating: Some(r), reviews: 100, ..Default::default() };
-        let rep = market("عسل", "", vec![o("عسل خوانسار", 300_000, 4.6, "torob"), o("عسل خوانسار گون", 320_000, 4.5, "digikala"), o("عسل سبلان", 200_000, 4.0, "torob"), o("عسل طبیعت", 210_000, 3.9, "basalam")], 25.0);
+        let o = |t: &str, p: i64, r: f64, plat: &str| Offer {
+            platform: plat.into(),
+            title: t.into(),
+            price: p,
+            rating: Some(r),
+            reviews: 100,
+            ..Default::default()
+        };
+        let rep = market(
+            "عسل",
+            "",
+            vec![
+                o("عسل خوانسار", 300_000, 4.6, "torob"),
+                o("عسل خوانسار گون", 320_000, 4.5, "digikala"),
+                o("عسل سبلان", 200_000, 4.0, "torob"),
+                o("عسل طبیعت", 210_000, 3.9, "basalam"),
+            ],
+            25.0,
+        );
         let m = market_of("خوانسار", "عسل", &[rep]);
         assert_eq!((m.offers, m.platforms.len()), (2, 2));
         assert!(m.price_index > 100.0 && m.rating.unwrap() > 4.4);
-        let site = Site { ok: true, https: true, ms: 800, title: "x".into(), description: "y".into(), schema: true, h1: true, contact: true, socials: vec!["instagram".into()], ..Default::default() };
-        let r = score(m, site, Social { handle: "x".into(), followers: Some(80_000), posts: Some(400) }, true);
+        let site = Site {
+            ok: true,
+            https: true,
+            ms: 800,
+            title: "x".into(),
+            description: "y".into(),
+            schema: true,
+            h1: true,
+            contact: true,
+            socials: vec!["instagram".into()],
+            ..Default::default()
+        };
+        let r = score(
+            m,
+            site,
+            Social {
+                handle: "x".into(),
+                followers: Some(80_000),
+                posts: Some(400),
+            },
+            true,
+        );
         assert!(r.presence.is_some() && r.quality.unwrap() > 80.0 && r.digital.unwrap() > 90.0 && r.social.unwrap() > 70.0);
         assert!(r.overall > 70.0 && !r.strengths.is_empty());
         // no data at all: no crash, actions tell what to do

@@ -4,29 +4,29 @@ mod admin;
 mod assist;
 mod background;
 mod balad;
+mod brand;
 mod channels;
 mod cloud;
 mod commands;
 mod db;
 mod enrich;
 mod export;
+mod identity;
 mod instagram;
+mod jobs;
 mod license;
+mod links;
 mod logic;
+mod market;
 mod neshan;
 mod outreach;
 mod scanner;
-mod market;
-mod brand;
-mod identity;
-mod jobs;
-mod links;
-mod web;
-mod watch;
 mod schedule;
 mod secrets;
 mod sources;
 mod telegram;
+mod watch;
+mod web;
 mod websearch;
 
 use commands::AppState;
@@ -137,7 +137,13 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
-        match std::fs::OpenOptions::new().create(true).truncate(false).write(true).share_mode(0).open(dir.join("app.lock")) {
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .share_mode(0)
+            .open(dir.join("app.lock"))
+        {
             Ok(f) => {
                 let _ = INSTANCE_LOCK.set(f);
             }

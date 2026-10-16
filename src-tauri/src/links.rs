@@ -23,7 +23,14 @@ pub fn domain(platform: &str) -> Option<&'static str> {
 }
 
 pub fn host(url: &str) -> String {
-    url.split("//").nth(1).unwrap_or("").split(['/', '?', '#']).next().unwrap_or("").trim_start_matches("www.").to_lowercase()
+    url.split("//")
+        .nth(1)
+        .unwrap_or("")
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or("")
+        .trim_start_matches("www.")
+        .to_lowercase()
 }
 
 fn path(url: &str) -> &str {
@@ -31,7 +38,21 @@ fn path(url: &str) -> &str {
     rest.find('/').map_or("/", |i| rest[i..].split(['?', '#']).next().unwrap_or("/"))
 }
 
-const TRACKING: &[&str] = &["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "gclid", "fbclid", "yclid", "_ga", "ref", "spm", "from", "source"];
+const TRACKING: &[&str] = &[
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_term",
+    "utm_content",
+    "gclid",
+    "fbclid",
+    "yclid",
+    "_ga",
+    "ref",
+    "spm",
+    "from",
+    "source",
+];
 
 /// Absolute https link without tracking parameters or fragment ("" stays "").
 pub fn canonical(url: &str) -> String {
@@ -39,7 +60,11 @@ pub fn canonical(url: &str) -> String {
     if u.is_empty() {
         return String::new();
     }
-    let u = if let Some(r) = u.strip_prefix("//") { format!("https://{r}") } else { u.to_string() };
+    let u = if let Some(r) = u.strip_prefix("//") {
+        format!("https://{r}")
+    } else {
+        u.to_string()
+    };
     let u = match u.strip_prefix("http://") {
         Some(r) => format!("https://{r}"),
         None => u,
@@ -147,7 +172,20 @@ pub fn kind(platform: &str, url: &str) -> Kind {
     }
 }
 
-const RESERVED_BASALAM: &[&str] = &["search", "accounts", "cart", "profile", "category", "categories", "blog", "about", "help", "landing", "p", "product"];
+const RESERVED_BASALAM: &[&str] = &[
+    "search",
+    "accounts",
+    "cart",
+    "profile",
+    "category",
+    "categories",
+    "blog",
+    "about",
+    "help",
+    "landing",
+    "p",
+    "product",
+];
 
 /// "exact": a product / ad page on the platform's own domain; "unverified": a link that could not
 /// be proven to be that product's page; "": no link.
@@ -216,8 +254,14 @@ pub fn from_json(platform: &str, o: &Map<String, Value>) -> (String, String) {
         }
         "basalam" => {
             let vendor = obj(o, &["vendor"]);
-            let ident = vendor.and_then(|v| s(v, "identifier")).filter(|x| x.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.'));
-            if let Some(u) = ["url", "link", "product_url"].iter().find_map(|k| o.get(*k).and_then(link_value)).filter(|u| own(u) == Kind::Product) {
+            let ident = vendor
+                .and_then(|v| s(v, "identifier"))
+                .filter(|x| x.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.'));
+            if let Some(u) = ["url", "link", "product_url"]
+                .iter()
+                .find_map(|k| o.get(*k).and_then(link_value))
+                .filter(|u| own(u) == Kind::Product)
+            {
                 product = fix(u);
             } else if let (Some(v), Some(i)) = (ident, id(o, "id")) {
                 product = format!("https://basalam.com/{v}/product/{i}");
@@ -300,19 +344,38 @@ mod tests {
     #[test]
     fn links_from_platform_json() {
         // Digikala: {url: {uri}} and the seller's code
-        let dk = m(json!({"id": 998, "title_fa": "عسل", "url": {"base": null, "uri": "/product/dkp-998/honey/"}, "default_variant": {"seller": {"code": "a1b2", "title": "الف"}}}));
-        assert_eq!(from_json("digikala", &dk), ("https://www.digikala.com/product/dkp-998/honey/".into(), "https://www.digikala.com/seller/a1b2/".into()));
+        let dk = m(
+            json!({"id": 998, "title_fa": "عسل", "url": {"base": null, "uri": "/product/dkp-998/honey/"}, "default_variant": {"seller": {"code": "a1b2", "title": "الف"}}}),
+        );
+        assert_eq!(
+            from_json("digikala", &dk),
+            (
+                "https://www.digikala.com/product/dkp-998/honey/".into(),
+                "https://www.digikala.com/seller/a1b2/".into()
+            )
+        );
         let dk2 = m(json!({"id": 7, "title_fa": "عسل"}));
         assert_eq!(from_json("digikala", &dk2).0, "https://www.digikala.com/product/dkp-7/");
         // Basalam: vendor identifier + product id; a photo url is never taken as the product link
-        let bs = m(json!({"id": 123456, "name": "عسل", "photo": {"url": "https://statics.basalam.com/p.jpg"}, "vendor": {"identifier": "shahd_azadi", "name": "شهد آزادی"}}));
-        assert_eq!(from_json("basalam", &bs), ("https://basalam.com/shahd_azadi/product/123456".into(), "https://basalam.com/shahd_azadi".into()));
+        let bs = m(
+            json!({"id": 123456, "name": "عسل", "photo": {"url": "https://statics.basalam.com/p.jpg"}, "vendor": {"identifier": "shahd_azadi", "name": "شهد آزادی"}}),
+        );
+        assert_eq!(
+            from_json("basalam", &bs),
+            (
+                "https://basalam.com/shahd_azadi/product/123456".into(),
+                "https://basalam.com/shahd_azadi".into()
+            )
+        );
         let bs2 = m(json!({"id": 1, "name": "عسل", "url": "https://statics.basalam.com/p.jpg"}));
         assert_eq!(from_json("basalam", &bs2), (String::new(), String::new()), "no guessed link");
         // Torob: relative product page
         let tb = m(json!({"name1": "عسل", "web_client_absolute_url": "/p/abc/عسل/"}));
         assert_eq!(from_json("torob", &tb).0, "https://torob.com/p/abc/عسل/");
         // Divar post token
-        assert_eq!(from_json("divar", &m(json!({"token": "gaEHxMzg", "title": "عسل"}))).0, "https://divar.ir/v/gaEHxMzg");
+        assert_eq!(
+            from_json("divar", &m(json!({"token": "gaEHxMzg", "title": "عسل"}))).0,
+            "https://divar.ir/v/gaEHxMzg"
+        );
     }
 }

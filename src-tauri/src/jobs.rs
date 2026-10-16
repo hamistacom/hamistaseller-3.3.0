@@ -59,7 +59,9 @@ struct Inner {
 pub struct Jobs(Arc<Inner>);
 
 fn now() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
 }
 
 pub const BUSY_SAME: &str = "همین عملیات هم‌اکنون در حال اجراست؛ آن را از پنل «عملیات» دنبال یا متوقف کنید.";
@@ -103,7 +105,12 @@ impl Jobs {
         list.insert(0, (token.clone(), info.clone()));
         drop(list);
         self.changed(&info);
-        Ok(Job { jobs: self.clone(), id, token, done: false })
+        Ok(Job {
+            jobs: self.clone(),
+            id,
+            token,
+            done: false,
+        })
     }
 
     fn update(&self, id: u64, f: impl FnOnce(&mut JobInfo)) {
@@ -187,10 +194,8 @@ impl Jobs {
                 i.state = "waiting_for_user".into();
                 i.step = message.clone();
             }
-            ScanEvent::Log { level, message } if matches!(*level, "warning" | "error") => {
-                if i.warnings.len() < 30 {
-                    i.warnings.push(message.clone());
-                }
+            ScanEvent::Log { level, message } if matches!(*level, "warning" | "error") && i.warnings.len() < 30 => {
+                i.warnings.push(message.clone());
             }
             _ => {}
         });
@@ -198,16 +203,6 @@ impl Jobs {
 }
 
 impl Job {
-    /// An event sink that keeps the job's state and forwards every event to `inner` (the page).
-    pub fn emitter(&self, inner: impl Fn(ScanEvent) + Send + Sync + 'static) -> impl Fn(ScanEvent) + Send + Sync + 'static {
-        let jobs = self.jobs.clone();
-        let id = self.id;
-        move |e: ScanEvent| {
-            jobs.record(id, &e);
-            inner(e);
-        }
-    }
-
     /// Ends the job. `error` = failed; else cancelled / partial (stopped) or completed (with warnings).
     pub fn finish(mut self, error: Option<&str>, message: &str) {
         self.close(error, message);
@@ -236,9 +231,11 @@ impl Job {
         // active jobs first, then the latest finished ones
         list.sort_by_key(|(_, i)| (!i.active(), std::cmp::Reverse(i.finished_at.max(i.started_at)), std::cmp::Reverse(i.id)));
         let mut finished = 0;
-        list.retain(|(_, i)| i.active() || {
-            finished += 1;
-            finished <= RECENT
+        list.retain(|(_, i)| {
+            i.active() || {
+                finished += 1;
+                finished <= RECENT
+            }
         });
     }
 }
@@ -268,8 +265,14 @@ mod tests {
         assert_eq!(jobs.start("scan", "y", false).err().as_deref(), Some(BUSY_SAME));
         let _c = jobs.start("brand", "z", false).unwrap();
         assert_eq!(jobs.start("brand", "w", false).err().as_deref(), Some(BUSY_MANY));
-        let emit = a.emitter(|_| {});
-        emit(ScanEvent::Progress { keyword: "عسل".into(), collected: 5, checked: 1, found: 3, target: 3 });
+        let emit = |e: ScanEvent| jobs.record(a.id, &e);
+        emit(ScanEvent::Progress {
+            keyword: "عسل".into(),
+            collected: 5,
+            checked: 1,
+            found: 3,
+            target: 3,
+        });
         emit(ScanEvent::Captcha { message: "تأیید".into() });
         assert_eq!(jobs.list().iter().find(|i| i.id == a.id).unwrap().state, "waiting_for_user");
         emit(ScanEvent::Status { message: "ادامه".into() });
@@ -278,7 +281,11 @@ mod tests {
         assert!(a.token.is_cancelled() && !b.token.is_cancelled(), "Stop is per job");
         let aid = a.id;
         a.finish(None, "متوقف شد");
-        assert_eq!(jobs.list().iter().find(|i| i.id == aid).unwrap().state, "partial", "stopped with data = partial");
+        assert_eq!(
+            jobs.list().iter().find(|i| i.id == aid).unwrap().state,
+            "partial",
+            "stopped with data = partial"
+        );
         b.finish(Some("خطا"), "");
         drop(scan); // dropped without finish (panic / early return)
         let l = jobs.list();

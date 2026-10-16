@@ -21,7 +21,10 @@ pub struct Prefs {
 }
 
 pub fn prefs(st: &AppState) -> Prefs {
-    Prefs { tray: close_to_tray(st), autostart: autostart_on() }
+    Prefs {
+        tray: close_to_tray(st),
+        autostart: autostart_on(),
+    }
 }
 
 /// Closing the window hides it to the tray — only when the tray icon really exists.
@@ -118,7 +121,12 @@ pub fn tray(app: &tauri::App) -> tauri::Result<()> {
             _ => {}
         })
         .on_tray_icon_event(|tray, e| {
-            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = e
+            {
                 show_main(tray.app_handle());
             }
         });
@@ -153,7 +161,10 @@ pub fn scheduler(app: AppHandle) {
                         Ok(sum) => sum.message.clone(),
                         Err(e) => format!("پایش قیمت انجام نشد: {e}"),
                     };
-                    let _ = app.emit("job-end", serde_json::json!({ "scheduled": true, "skipped": skipped, "message": text, "error": res.as_ref().map_or(true, |r| r.error) }));
+                    let _ = app.emit(
+                        "job-end",
+                        serde_json::json!({ "scheduled": true, "skipped": skipped, "message": text, "error": res.as_ref().map_or(true, |r| r.error) }),
+                    );
                     if st.quit.load(std::sync::atomic::Ordering::Relaxed) {
                         app.exit(0);
                     }
@@ -178,7 +189,10 @@ pub fn scheduler(app: AppHandle) {
             };
             schedule::finished(&st.db, s.id, &text);
             st.db.log("schedule", &format!("زمان‌بندی «{}»: {text}", s.name));
-            let _ = app.emit("job-end", serde_json::json!({ "scheduled": true, "message": text, "error": res.as_ref().map_or(true, |r| r.error) }));
+            let _ = app.emit(
+                "job-end",
+                serde_json::json!({ "scheduled": true, "message": text, "error": res.as_ref().map_or(true, |r| r.error) }),
+            );
             if st.quit.load(std::sync::atomic::Ordering::Relaxed) {
                 app.exit(0); // quit was asked while the schedule ran
             }

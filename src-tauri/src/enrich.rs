@@ -54,7 +54,12 @@ pub async fn enrich(http: &reqwest::Client, c: &mut Contacts) {
 pub async fn image_data_url(url: &str) -> crate::db::Res<String> {
     const MAX: usize = 3 * 1024 * 1024;
     let r = client().get(url).send().await.map_err(|e| format!("عکس دریافت نشد: {e}"))?;
-    let kind = r.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    let kind = r
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
     if !r.status().is_success() || !kind.starts_with("image/") {
         return Ok(String::new());
     }

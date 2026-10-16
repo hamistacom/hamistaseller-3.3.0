@@ -5,7 +5,25 @@ use crate::db::{Place, Res};
 use crate::logic::{emails_in_text, host_path, links_in_text, meta_content, phones_in_text, Contacts};
 use crate::websearch::Hit;
 
-const RESERVED: &[&str] = &["s", "joinchat", "c", "share", "addstickers", "addemoji", "proxy", "socks", "iv", "login", "contact", "setlanguage", "boost", "addlist", "giftcode", "invoice", "bg"];
+const RESERVED: &[&str] = &[
+    "s",
+    "joinchat",
+    "c",
+    "share",
+    "addstickers",
+    "addemoji",
+    "proxy",
+    "socks",
+    "iv",
+    "login",
+    "contact",
+    "setlanguage",
+    "boost",
+    "addlist",
+    "giftcode",
+    "invoice",
+    "bg",
+];
 
 /// `https://t.me/s/lamiz_cafe/120` → `lamiz_cafe`. None for invite links, posts-only links, etc.
 pub fn handle_of(url: &str) -> Option<String> {
@@ -43,11 +61,7 @@ pub type Found = (Place, Contacts, Vec<(&'static str, String)>);
 
 pub async fn read(http: &reqwest::Client, hit: &Hit, mut place: Place) -> Res<Option<Found>> {
     let Some(handle) = handle_of(&hit.url) else { return Ok(None) };
-    let resp = http
-        .get(format!("{}/{handle}", base()))
-        .send()
-        .await
-        .map_err(|e| format!("@{handle}: {e}"))?;
+    let resp = http.get(format!("{}/{handle}", base())).send().await.map_err(|e| format!("@{handle}: {e}"))?;
     let html = resp.text().await.map_err(|e| format!("@{handle}: {e}"))?;
     let Some(subs) = subscribers(&html) else {
         return Ok(None); // a group or a person: not a business channel

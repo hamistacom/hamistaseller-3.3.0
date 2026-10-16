@@ -100,12 +100,9 @@ pub fn verify_cloud(token: &str, machine: &str) -> Result<CloudClaims, String> {
         return Err("توکن سرور نامعتبر است.".into());
     };
     let payload = crate::logic::b64_decode(p).ok_or("توکن سرور نامعتبر است.")?;
-    let sig: [u8; 64] = crate::logic::b64_decode(sg)
-        .and_then(|v| v.try_into().ok())
-        .ok_or("توکن سرور نامعتبر است.")?;
-    key.verify(&payload, &Signature::from_bytes(&sig)).map_err(|_| {
-        "امضای سرور با کلید این نسخه نمی‌خواند. کلید خصوصی پنل مدیر باید روی سرور تنظیم شده باشد (راهنمای سرور).".to_string()
-    })?;
+    let sig: [u8; 64] = crate::logic::b64_decode(sg).and_then(|v| v.try_into().ok()).ok_or("توکن سرور نامعتبر است.")?;
+    key.verify(&payload, &Signature::from_bytes(&sig))
+        .map_err(|_| "امضای سرور با کلید این نسخه نمی‌خواند. کلید خصوصی پنل مدیر باید روی سرور تنظیم شده باشد (راهنمای سرور).".to_string())?;
     let c: CloudClaims = serde_json::from_slice(&payload).map_err(|_| "توکن سرور نامعتبر است.")?;
     if c.machine != cloud_machine(machine) {
         return Err("این توکن برای سیستم دیگری صادر شده است.".into());
@@ -147,7 +144,11 @@ fn online_status(db: &Db, token: &str, mut st: Status) -> Status {
         return st;
     }
     st.valid = true;
-    st.days_left = if c.sub_expires.is_empty() { 9999 } else { db.days_between(&today, &c.sub_expires) };
+    st.days_left = if c.sub_expires.is_empty() {
+        9999
+    } else {
+        db.days_between(&today, &c.sub_expires)
+    };
     if st.days_left <= 7 {
         st.message = format!("{} روز تا پایان اشتراک", st.days_left);
     }

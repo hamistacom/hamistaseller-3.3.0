@@ -263,14 +263,7 @@ return {
 };
 "#;
 
-pub async fn run_divar(
-    db: &Db,
-    s: &Settings,
-    profile: &Path,
-    req: &ScanRequest,
-    token: &CancellationToken,
-    emit: Emit<'_>,
-) -> Res<Summary> {
+pub async fn run_divar(db: &Db, s: &Settings, profile: &Path, req: &ScanRequest, token: &CancellationToken, emit: Emit<'_>) -> Res<Summary> {
     run_platform(
         db,
         s,
@@ -286,14 +279,7 @@ pub async fn run_divar(
     .await
 }
 
-pub async fn run_sheypoor(
-    db: &Db,
-    s: &Settings,
-    profile: &Path,
-    req: &ScanRequest,
-    token: &CancellationToken,
-    emit: Emit<'_>,
-) -> Res<Summary> {
+pub async fn run_sheypoor(db: &Db, s: &Settings, profile: &Path, req: &ScanRequest, token: &CancellationToken, emit: Emit<'_>) -> Res<Summary> {
     run_platform(
         db,
         s,
@@ -322,12 +308,7 @@ async fn run_platform(
     login_url: &str,
     search_tpl: &str,
 ) -> Res<Summary> {
-    let keywords: Vec<String> = req
-        .keywords
-        .iter()
-        .map(|k| k.trim().to_string())
-        .filter(|k| !k.is_empty())
-        .collect();
+    let keywords: Vec<String> = req.keywords.iter().map(|k| k.trim().to_string()).filter(|k| !k.is_empty()).collect();
 
     if keywords.is_empty() {
         return Err("حداقل یک کلمه کلیدی وارد کنید.".into());
@@ -408,9 +389,7 @@ async fn run_platform(
                 break;
             }
             status(emit, format!("جستجوی آگهی‌های جدید «{term}» در {source_label} (به ترتیب تاریخ)…"));
-            let search_url = search_tpl
-                .replace("{city}", slug)
-                .replace("{q}", &pct_encode(term));
+            let search_url = search_tpl.replace("{city}", slug).replace("{q}", &pct_encode(term));
 
             goto(&eng.list, &search_url).await;
 
@@ -424,9 +403,7 @@ async fn run_platform(
                     if out.blocked && !login_prompted {
                         login_prompted = true;
                         emit(ScanEvent::Captcha {
-                            message: format!(
-                                "{source_label} تأیید «ربات نیستم» خواست. در پنجره بازشده تأیید را انجام دهید تا ادامه پیدا کند."
-                            ),
+                            message: format!("{source_label} تأیید «ربات نیستم» خواست. در پنجره بازشده تأیید را انجام دهید تا ادامه پیدا کند."),
                         });
                         shut(Some(eng)).await;
                         eng = launch(s, profile, false, 1).await?;
@@ -574,14 +551,19 @@ async fn run_platform(
                 (false, true) => date_tag.clone(),
                 (false, false) => source_label.to_string(),
             };
-            let labels = vec![
-                ("mobile", contact_label.clone()),
-                ("landline", contact_label.clone()),
-            ];
+            let labels = vec![("mobile", contact_label.clone()), ("landline", contact_label.clone())];
 
             let note_info = [
-                if !date_tag.is_empty() { format!("تاریخ آگهی: {date_tag}") } else { String::new() },
-                if !cleaned_addr.is_empty() { format!("محدوده: {cleaned_addr}") } else { String::new() },
+                if !date_tag.is_empty() {
+                    format!("تاریخ آگهی: {date_tag}")
+                } else {
+                    String::new()
+                },
+                if !cleaned_addr.is_empty() {
+                    format!("محدوده: {cleaned_addr}")
+                } else {
+                    String::new()
+                },
                 format!("لینک آگهی: {}", ad.href),
             ]
             .into_iter()

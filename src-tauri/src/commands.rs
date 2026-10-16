@@ -1,8 +1,8 @@
 //! IPC surface. Commands stay thin: validate input, call a module, return `Res<T>`.
 //! Tauri converts snake_case argument names to camelCase for JS (`list_id` → `listId`).
 use crate::db::{err, Account, Activity, Campaign, Contact, Dashboard, Db, Facets, Filter, ListInfo, Place, Res, Run, Template, KINDS};
-use crate::outreach::CampaignReq;
 use crate::jobs::{Job, Jobs};
+use crate::outreach::CampaignReq;
 use crate::scanner::{Emit, ScanEvent, ScanRequest, Summary};
 use crate::{admin, assist, channels, cloud, export, license, logic, outreach, scanner, secrets, sources};
 use futures::FutureExt;
@@ -13,15 +13,14 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::Mutex;
 use tauri::{ipc::Channel, AppHandle, Manager, State};
-use tokio_util::sync::CancellationToken;
 
 pub struct AppState {
     pub db: Db,
     pub dir: PathBuf,
     /// Every running (and the last few finished) operations — see jobs.rs.
     pub jobs: Jobs,
-    pub quit: AtomicBool,                                      // window closed mid-job: exit once every job has shut down
-    pub migrated: Mutex<Option<Value>>,                        // one-time notice after importing SellerMap v3
+    pub quit: AtomicBool,               // window closed mid-job: exit once every job has shut down
+    pub migrated: Mutex<Option<Value>>, // one-time notice after importing SellerMap v3
 }
 
 /// Kept for callers that only need to know a job could not start (the scheduler retries later).
@@ -51,7 +50,8 @@ pub async fn run_job<T>(
     });
     match res.as_ref().map(&outcome) {
         Ok(Ok(msg)) => job.finish(None, &msg),
-        Ok(Err(e)) | Err(e) => job.finish(Some(&e.to_string()), ""),
+        Ok(Err(e)) => job.finish(Some(&e), ""),
+        Err(e) => job.finish(Some(e), ""),
     }
     if state.quit.load(Relaxed) && state.jobs.running().is_empty() {
         if let Some(app) = app {
@@ -207,11 +207,18 @@ pub async fn run_scan(app: Option<&AppHandle>, state: &AppState, req: ScanReques
     let wanted = sources::requested(&req);
     let list: Vec<String> = wanted
         .iter()
-        .filter(|id| sources::get(id).is_some_and(|s| s.kind == "scan" && s.ready) && sources::enabled(&state.db, id) && license::source_allowed(&st, id).is_ok())
+        .filter(|id| {
+            sources::get(id).is_some_and(|s| s.kind == "scan" && s.ready) && sources::enabled(&state.db, id) && license::source_allowed(&st, id).is_ok()
+        })
         .cloned()
         .collect();
     if list.is_empty() {
-        return Err(if wanted.is_empty() { "منبع استخراج را انتخاب کنید." } else { "منبع انتخاب‌شده خاموش است یا در اشتراک شما فعال نیست." }.into());
+        return Err(if wanted.is_empty() {
+            "منبع استخراج را انتخاب کنید."
+        } else {
+            "منبع انتخاب‌شده خاموش است یا در اشتراک شما فعال نیست."
+        }
+        .into());
     }
     let mut req = req;
     if !sources::enabled(&state.db, "website") {
@@ -225,39 +232,39 @@ pub async fn run_scan(app: Option<&AppHandle>, state: &AppState, req: ScanReques
     let (token, id) = (job.token.clone(), job.id);
     let emit = &tee(&state.jobs, id, emit);
     let work = async {
-    if let Some(id) = resumed {
-        state.db.run_resumed(id);
-    }
-    let s: scanner::Settings = serde_json::from_value(Value::Object(settings(&state.db))).unwrap_or_default();
-    let profile = state.dir.join("browser-profile");
-    let db = &state.db;
-    let ran = std::sync::Mutex::new(0i64); // sources that actually ran = units of the monthly quota
-    let res = AssertUnwindSafe(sources::run_all(db, &s, &profile, &req, &list, &token, emit, |_, r| {
-        if r.checked > 0 {
-            *ran.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+        if let Some(id) = resumed {
+            state.db.run_resumed(id);
         }
-    }))
-    .catch_unwind()
-    .await;
-    if let Ok(Ok(sum)) = &res {
-        let names: Vec<&str> = list.iter().map(|id| sources::get(id).map_or(id.as_str(), |x| x.name)).collect();
-        state.db.log(
-            "scan",
-            &format!("استخراج «{}» از {}: {} مخاطب جدید", req.keywords.join("، "), names.join("، "), sum.found),
-        );
-        let units = *ran.lock().unwrap_or_else(|e| e.into_inner());
-        if units > 0 {
-            if let Err(e) = cloud::consume(&state.db, "scan", units).await {
-                crate::log_line("WARN", &format!("scan quota: {e}"));
+        let s: scanner::Settings = serde_json::from_value(Value::Object(settings(&state.db))).unwrap_or_default();
+        let profile = state.dir.join("browser-profile");
+        let db = &state.db;
+        let ran = std::sync::Mutex::new(0i64); // sources that actually ran = units of the monthly quota
+        let res = AssertUnwindSafe(sources::run_all(db, &s, &profile, &req, &list, &token, emit, |_, r| {
+            if r.checked > 0 {
+                *ran.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+            }
+        }))
+        .catch_unwind()
+        .await;
+        if let Ok(Ok(sum)) = &res {
+            let names: Vec<&str> = list.iter().map(|id| sources::get(id).map_or(id.as_str(), |x| x.name)).collect();
+            state.db.log(
+                "scan",
+                &format!("استخراج «{}» از {}: {} مخاطب جدید", req.keywords.join("، "), names.join("، "), sum.found),
+            );
+            let units = *ran.lock().unwrap_or_else(|e| e.into_inner());
+            if units > 0 {
+                if let Err(e) = cloud::consume(&state.db, "scan", units).await {
+                    crate::log_line("WARN", &format!("scan quota: {e}"));
+                }
+            }
+            if sum.found > 0 {
+                if let Err(e) = cloud::mega_sync(&state.db).await {
+                    crate::log_line("WARN", &format!("mega sync after scan: {e}"));
+                }
             }
         }
-        if sum.found > 0 {
-            if let Err(e) = cloud::mega_sync(&state.db).await {
-                crate::log_line("WARN", &format!("mega sync after scan: {e}"));
-            }
-        }
-    }
-    unwind(res)
+        unwind(res)
     };
     run_job(app, state, job, work, summary_outcome).await
 }
@@ -367,7 +374,12 @@ pub async fn assist_session(app: AppHandle, state: State<'_, AppState>, messenge
 
 /// Collects prices from the chosen platforms (browser only when an API does not answer).
 #[tauri::command]
-pub async fn market_search(app: AppHandle, state: State<'_, AppState>, req: crate::market::MarketReq, on_event: Channel<ScanEvent>) -> Res<crate::market::Report> {
+pub async fn market_search(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    req: crate::market::MarketReq,
+    on_event: Channel<ScanEvent>,
+) -> Res<crate::market::Report> {
     license::ensure(&state.db)?;
     let job = state.jobs.start("market", &format!("تحلیل محصول «{}»", req.query.trim()), false)?;
     let (s, profile) = market_settings(&state);
@@ -375,7 +387,10 @@ pub async fn market_search(app: AppHandle, state: State<'_, AppState>, req: crat
     let page = emitter(on_event);
     let emit = tee(&state.jobs, job.id, &page);
     let work = crate::market::search(&state.db, &s, &profile, &req, &token, &emit);
-    run_job(Some(&app), &state, job, work, |r| Ok(format!("{} پیشنهاد معتبر از {} منبع", r.offers.len(), r.channels.len()))).await
+    run_job(Some(&app), &state, job, work, |r| {
+        Ok(format!("{} پیشنهاد معتبر از {} منبع", r.offers.len(), r.channels.len()))
+    })
+    .await
 }
 
 /// Builds a ready-to-copy price-enquiry (RFQ) message; nothing is sent.
@@ -462,7 +477,10 @@ pub async fn market_login(state: State<'_, AppState>, platform: String) -> Res<(
 // ---------------- daily watchlist & the seller's catalogue ----------------
 
 fn market_settings(state: &AppState) -> (scanner::Settings, PathBuf) {
-    (serde_json::from_value(Value::Object(settings(&state.db))).unwrap_or_default(), state.dir.join("browser-profile"))
+    (
+        serde_json::from_value(Value::Object(settings(&state.db))).unwrap_or_default(),
+        state.dir.join("browser-profile"),
+    )
 }
 
 #[tauri::command]
@@ -569,7 +587,10 @@ pub async fn city_photo(state: State<'_, AppState>, city: String) -> Res<String>
     let fetch = async {
         let v: serde_json::Value = crate::enrich::client().get(&api).send().await.ok()?.json().await.ok()?;
         let pages = v.pointer("/query/pages")?.as_object()?;
-        let src = pages.values().find_map(|p| p.pointer("/thumbnail/source").and_then(|s| s.as_str()))?.to_string();
+        let src = pages
+            .values()
+            .find_map(|p| p.pointer("/thumbnail/source").and_then(|s| s.as_str()))?
+            .to_string();
         // maps, flags and seals are not photos
         let low = src.to_lowercase();
         if [".svg", "map", "flag", "seal", "logo", "location"].iter().any(|k| low.contains(k)) {
@@ -1105,7 +1126,10 @@ pub async fn source_config(state: State<'_, AppState>, id: String) -> Res<Map<St
 #[tauri::command]
 pub async fn source_config_save(state: State<'_, AppState>, id: String, values: Map<String, Value>) -> Res<Map<String, Value>> {
     sources::config_save(&state.db, &id, &values)?;
-    state.db.log("settings", &format!("تنظیمات ماژول «{}» ذخیره شد", sources::get(&id).map_or(id.as_str(), |s| s.name)));
+    state.db.log(
+        "settings",
+        &format!("تنظیمات ماژول «{}» ذخیره شد", sources::get(&id).map_or(id.as_str(), |s| s.name)),
+    );
     Ok(sources::config_status(&state.db, &id))
 }
 
@@ -1202,8 +1226,7 @@ pub async fn admin_export(app: AppHandle, state: State<'_, AppState>, kind: Stri
     issuer_only()?;
     let text = match kind.as_str() {
         "customers" => admin::customers_csv(&state.db)?,
-        "megabank" => cloud::admin_call(&state.db, "POST", "/megabank/export", Some(filter.unwrap_or(serde_json::json!({}))))
-            .await?["text"]
+        "megabank" => cloud::admin_call(&state.db, "POST", "/megabank/export", Some(filter.unwrap_or(serde_json::json!({})))).await?["text"]
             .as_str()
             .unwrap_or_default()
             .to_string(),
@@ -1257,7 +1280,14 @@ pub async fn background_get(state: State<'_, AppState>) -> Res<crate::background
 #[tauri::command]
 pub async fn background_set(state: State<'_, AppState>, prefs: crate::background::Prefs) -> Res<crate::background::Prefs> {
     let p = crate::background::set_prefs(&state, prefs)?;
-    state.db.log("settings", &format!("اجرا در پس‌زمینه: {} · همراه ویندوز: {}", if p.tray { "روشن" } else { "خاموش" }, if p.autostart { "روشن" } else { "خاموش" }));
+    state.db.log(
+        "settings",
+        &format!(
+            "اجرا در پس‌زمینه: {} · همراه ویندوز: {}",
+            if p.tray { "روشن" } else { "خاموش" },
+            if p.autostart { "روشن" } else { "خاموش" }
+        ),
+    );
     Ok(p)
 }
 
@@ -1299,15 +1329,29 @@ pub async fn support_report(app: AppHandle, state: State<'_, AppState>) -> Res<S
     line("کد سیستم", st.machine.clone());
     line(
         "لایسنس",
-        format!("{} · {} · {} · تا {} · {}", if st.valid { "معتبر" } else { "نامعتبر" }, st.mode, st.plan, st.expires, st.message),
+        format!(
+            "{} · {} · {} · تا {} · {}",
+            if st.valid { "معتبر" } else { "نامعتبر" },
+            st.mode,
+            st.plan,
+            st.expires,
+            st.message
+        ),
     );
     let lists = state.db.lists().unwrap_or_default();
-    line("بانک‌ها", lists.iter().map(|l| format!("{} ({})", l.name, l.count)).collect::<Vec<_>>().join("، "));
+    line(
+        "بانک‌ها",
+        lists.iter().map(|l| format!("{} ({})", l.name, l.count)).collect::<Vec<_>>().join("، "),
+    );
     for s in sources::SOURCES {
         let cfg = sources::config_status(&state.db, s.id);
         line(
             &format!("ماژول {}", s.id),
-            format!("{} {}", if sources::enabled(&state.db, s.id) { "روشن" } else { "خاموش" }, if cfg.is_empty() { String::new() } else { Value::Object(cfg).to_string() }),
+            format!(
+                "{} {}",
+                if sources::enabled(&state.db, s.id) { "روشن" } else { "خاموش" },
+                if cfg.is_empty() { String::new() } else { Value::Object(cfg).to_string() }
+            ),
         );
     }
     let safe_settings: Map<String, Value> = settings(&state.db)
@@ -1317,7 +1361,10 @@ pub async fn support_report(app: AppHandle, state: State<'_, AppState>) -> Res<S
     line("تنظیمات", Value::Object(safe_settings).to_string());
     out.push_str("\n— آخرین استخراج‌ها —\n");
     for r in state.db.runs().unwrap_or_default().iter().take(15) {
-        out.push_str(&format!("{} | {} | {} {} | {}/{} | {} {}\n", r.started_at, r.keyword, r.province, r.city, r.found, r.checked, r.status, r.error));
+        out.push_str(&format!(
+            "{} | {} | {} {} | {}/{} | {} {}\n",
+            r.started_at, r.keyword, r.province, r.city, r.found, r.checked, r.status, r.error
+        ));
     }
     out.push_str("\n— گزارش برنامه (آخرین ۴۰۰ خط) —\n");
     let log = std::fs::read_to_string(state.dir.join("logs").join("hamista.log")).unwrap_or_default();

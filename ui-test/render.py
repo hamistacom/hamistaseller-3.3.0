@@ -140,6 +140,37 @@ with sync_playwright() as pw:
     p.screenshot(path=f"{OUT}/x-campaign-live.png")
     ctx.close()
 
+    # market report: exercise the new tabs (exact-link badges, suppliers, web sources)
+    for theme in ("light", "dark"):
+        ctx, p = page_for(b, 1440, 900, theme, "market-report")
+        p.goto(f"{BASE}#/market?run=7")
+        p.wait_for_timeout(700)
+        overflow_check(p, f"market-report-{theme}")
+        for tab in ("محصولات", "عمده‌فروشان", "منابع وب", "برندها"):
+            try:
+                p.click(f".rep-tabs >> text={tab}", timeout=1500)
+                p.wait_for_timeout(300)
+                overflow_check(p, f"market-{tab}-{theme}")
+            except Exception:
+                pass
+        p.screenshot(path=f"{OUT}/x-market-report-{theme}.png", full_page=True)
+        ctx.close()
+
+    # B2B / RFQ modal
+    ctx, p = page_for(b, 1366, 768, "light", "rfq")
+    p.goto(f"{BASE}#/market?run=7")
+    p.wait_for_timeout(600)
+    try:
+        p.click("text=عمده‌فروشان", timeout=1500)
+        p.wait_for_timeout(200)
+        p.click("text=ساخت درخواست استعلام", timeout=1500)
+        p.wait_for_timeout(300)
+        overflow_check(p, "rfq-modal")
+        p.screenshot(path=f"{OUT}/x-rfq.png")
+    except Exception:
+        pass
+    ctx.close()
+
     # customer: expiring soon, and not activated (modal opens by itself)
     for q in ("edition=customer", "edition=customer&lic=invalid"):
         ctx, p = page_for(b, 1366, 768, "light", q)

@@ -101,7 +101,11 @@ impl ScanRequest {
 
     /// City shown in the history: the exact district when there is one.
     pub fn run_city(&self) -> String {
-        if self.district.trim().is_empty() { self.city.trim().to_string() } else { self.area() }
+        if self.district.trim().is_empty() {
+            self.city.trim().to_string()
+        } else {
+            self.area()
+        }
     }
 
     /// Search queries for one keyword, and whether they are exactly what the user asked for
@@ -186,7 +190,8 @@ pub fn detect_browser(custom: &str) -> Option<String> {
     browsers(custom).into_iter().next()
 }
 
-const CAPTCHA_WAIT: &str = "منبع داده تأیید «ربات نیستم» خواست. یک پنجره مرورگر باز شد؛ تأیید را در آن انجام دهید یا دکمه «ادامه» را بزنید تا استخراج ادامه پیدا کند.";
+const CAPTCHA_WAIT: &str =
+    "منبع داده تأیید «ربات نیستم» خواست. یک پنجره مرورگر باز شد؛ تأیید را در آن انجام دهید یا دکمه «ادامه» را بزنید تا استخراج ادامه پیدا کند.";
 const CAPTCHA_GIVE_UP: &str = "منبع داده چند بار پشت‌سرهم تأیید خواست. چند دقیقه صبر کنید یا تعداد تب‌ها را در تنظیمات کم کنید؛ داده‌های ذخیره‌شده حفظ شده‌اند.";
 const BROWSER_DIED: &str = "مرورگر چند بار از کار افتاد؛ داده‌های ذخیره‌شده حفظ شده‌اند.";
 const ENRICHERS: usize = 4;
@@ -504,7 +509,10 @@ fn kill_profile_users(profile: &Path) {
         let ps = format!(
             "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | Where-Object {{ $_.CommandLine -and $_.CommandLine.Contains('{dir}') }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}"
         );
-        let _ = std::process::Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &ps]).creation_flags(0x0800_0000).output();
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &ps])
+            .creation_flags(0x0800_0000)
+            .output();
     }
     #[cfg(not(windows))]
     let _ = profile;
@@ -527,30 +535,29 @@ async fn launch_in(exe: &str, profile: &Path, headless: bool, tabs: usize) -> Re
     }
     let log = std::fs::File::create(profile.with_file_name("browser-last.log")).ok();
     let mut cmd = std::process::Command::new(exe);
-    cmd.arg(format!("--user-data-dir={}", profile.display()))
-        .args([
-            "--remote-debugging-port=0",
-            "--remote-allow-origins=*",
-            "--window-size=1280,900",
-            "--lang=fa",
-            "--blink-settings=imagesEnabled=false",
-            "--disable-notifications",
-            "--mute-audio",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--disable-default-apps",
-            "--disable-sync",
-            "--disable-extensions",
-            "--disable-component-update",
-            "--disable-session-crashed-bubble",
-            "--hide-crash-restore-bubble",
-            "--disable-features=Translate,msEdgeStartupBoost,msImplicitSignin,msEdgeSidebarV2",
-            "--disable-blink-features=AutomationControlled", // navigator.webdriver = false
-            // background tabs must run at full speed for parallel workers
-            "--disable-background-timer-throttling",
-            "--disable-renderer-backgrounding",
-            "--disable-backgrounding-occluded-windows",
-        ]);
+    cmd.arg(format!("--user-data-dir={}", profile.display())).args([
+        "--remote-debugging-port=0",
+        "--remote-allow-origins=*",
+        "--window-size=1280,900",
+        "--lang=fa",
+        "--blink-settings=imagesEnabled=false",
+        "--disable-notifications",
+        "--mute-audio",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-default-apps",
+        "--disable-sync",
+        "--disable-extensions",
+        "--disable-component-update",
+        "--disable-session-crashed-bubble",
+        "--hide-crash-restore-bubble",
+        "--disable-features=Translate,msEdgeStartupBoost,msImplicitSignin,msEdgeSidebarV2",
+        "--disable-blink-features=AutomationControlled", // navigator.webdriver = false
+        // background tabs must run at full speed for parallel workers
+        "--disable-background-timer-throttling",
+        "--disable-renderer-backgrounding",
+        "--disable-backgrounding-occluded-windows",
+    ]);
     if headless {
         cmd.arg("--headless=new");
     }
@@ -580,7 +587,9 @@ async fn launch_in(exe: &str, profile: &Path, headless: bool, tabs: usize) -> Re
         request_timeout: Duration::from_secs(20),
         ..Default::default()
     };
-    let (browser, mut handler) = Browser::connect_with_config(url, config).await.map_err(|e| format!("اتصال به مرورگر ممکن نشد: {e}"))?;
+    let (browser, mut handler) = Browser::connect_with_config(url, config)
+        .await
+        .map_err(|e| format!("اتصال به مرورگر ممکن نشد: {e}"))?;
     let alive = Arc::new(AtomicBool::new(true));
     let flag = alive.clone();
     tokio::spawn(async move {
@@ -601,7 +610,14 @@ async fn launch_in(exe: &str, profile: &Path, headless: bool, tabs: usize) -> Re
     for _ in 0..tabs {
         workers.push(new_tab(&browser, &ua).await?);
     }
-    Ok(Engine { browser, alive, list, workers, proc, _lease: None })
+    Ok(Engine {
+        browser,
+        alive,
+        list,
+        workers,
+        proc,
+        _lease: None,
+    })
 }
 
 async fn new_tab(browser: &Browser, ua: &str) -> Res<Page> {
@@ -688,7 +704,11 @@ pub async fn run(db: &Db, s: &Settings, profile: &Path, req: &ScanRequest, token
 
     let mut i = 0;
     // exact look-ups restart from the first entry on resume (found ones are skipped as known)
-    let mut target = if req.first_limit > 0 && req.lookups.is_empty() { req.first_limit.min(limit) } else { limit };
+    let mut target = if req.first_limit > 0 && req.lookups.is_empty() {
+        req.first_limit.min(limit)
+    } else {
+        limit
+    };
     let mut cur: Option<(i64, i64, i64)> = None; // (run id, checked, found) of the current keyword
     while i < keywords.len() && !token.is_cancelled() {
         let kw = &keywords[i];

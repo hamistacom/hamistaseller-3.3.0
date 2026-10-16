@@ -147,10 +147,7 @@ pub fn stats(db: &Db) -> std::collections::HashMap<String, (i64, i64)> {
         return Default::default();
     };
     st.query_map([], |r| {
-        Ok((
-            r.get::<_, String>(0)?,
-            (r.get::<_, i64>(1)?, r.get::<_, Option<i64>>(2)?.unwrap_or(0)),
-        ))
+        Ok((r.get::<_, String>(0)?, (r.get::<_, i64>(1)?, r.get::<_, Option<i64>>(2)?.unwrap_or(0))))
     })
     .map(|rows| rows.flatten().collect())
     .unwrap_or_default()
@@ -340,7 +337,11 @@ pub async fn run_all(
         }
     }
     sum.cancelled = token.is_cancelled();
-    let head = if sum.cancelled { "متوقف شد." } else { "پایان استخراج از همه منابع." };
+    let head = if sum.cancelled {
+        "متوقف شد."
+    } else {
+        "پایان استخراج از همه منابع."
+    };
     sum.message = format!("{head} {} مورد بررسی و {} مخاطب جدید — {}", sum.checked, sum.found, lines.join("، "));
     sum.error = sum.error && sum.found == 0;
     Ok(sum)

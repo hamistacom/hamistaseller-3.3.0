@@ -109,7 +109,10 @@ fn write_xlsx(rows: &[Vec<String>], stats: &BankStats, path: &Path) -> Res<()> {
     type Block<'a> = (&'a [&'a str], Vec<(Vec<String>, i64)>); // headers, (texts, count) rows
     let blocks: [Block; 5] = [
         (&["استان", "تعداد"], one(&stats.provinces, str::to_string)),
-        (&["شهرستان", "استان", "تعداد"], stats.cities.iter().map(|(p, c, n)| (vec![c.clone(), p.clone()], *n)).collect()),
+        (
+            &["شهرستان", "استان", "تعداد"],
+            stats.cities.iter().map(|(p, c, n)| (vec![c.clone(), p.clone()], *n)).collect(),
+        ),
         (&["حوزه کاری", "تعداد"], one(&stats.categories, str::to_string)),
         (&["کلمه کلیدی", "تعداد"], one(&stats.keywords, str::to_string)),
         (&["وضعیت", "تعداد"], one(&stats.statuses, |s| status_label(s).to_string())),

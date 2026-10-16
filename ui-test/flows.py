@@ -346,7 +346,7 @@ with sync_playwright() as pw:
     r = calls(p, "market_search")
     q = r[-1]["req"] if r else {}
     check("market_search", q.get("query") == "کیسه فریزر" and q.get("targetMargin") == 30 and q.get("minPrice") == 20000 and q.get("maxPrice") == 900000 and q.get("limit") == 120 and q.get("sort") == "bestselling" and q.get("exact") is False and q.get("province") == "فارس" and "emalls" not in q.get("platforms", []) and "divar" in q.get("platforms", []), q)
-    check("market report shown", p.locator(".kpi3").count() == 4 and p.locator(".advice").count() == 1 and p.locator(".rep-tabs button").count() == 7)
+    check("market report shown", p.locator(".kpi3").count() == 4 and p.locator(".advice").count() == 1 and p.locator(".rep-tabs button").count() == 9)
     check("filtered note", p.locator(".filt").count() == 1)
     # tabs
     p.click(".rep-tabs button >> nth=1")

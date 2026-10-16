@@ -10,31 +10,125 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 const COUNT_UNITS: &[&str] = &["عدد", "عددی", "تایی", "تا", "عدد\u{200c}ی", "pcs", "pc", "بسته\u{200c}ای", "برگ", "ورق", "رول"];
-const SIZE_UNITS: &[&str] = &["کیلو", "کیلویی", "کیلوگرم", "کیلوگرمی", "گرم", "گرمی", "لیتر", "لیتری", "ليتر", "میلی", "میلی\u{200c}لیتر", "سی", "سی\u{200c}سی", "مثقال", "مثقالی", "kg", "gr", "ml", "lit"];
+const SIZE_UNITS: &[&str] = &[
+    "کیلو",
+    "کیلویی",
+    "کیلوگرم",
+    "کیلوگرمی",
+    "گرم",
+    "گرمی",
+    "لیتر",
+    "لیتری",
+    "ليتر",
+    "میلی",
+    "میلی\u{200c}لیتر",
+    "سی",
+    "سی\u{200c}سی",
+    "مثقال",
+    "مثقالی",
+    "kg",
+    "gr",
+    "ml",
+    "lit",
+];
 /// Technical units whose number is part of the model: (spelling, canonical).
 const TECH_UNITS: &[(&str, &str)] = &[
-    ("گیگ", "gb"), ("گیگابایت", "gb"), ("gb", "gb"), ("ترابایت", "tb"), ("ترا", "tb"), ("tb", "tb"),
-    ("مگاپیکسل", "mp"), ("mp", "mp"), ("میلی\u{200c}آمپر", "mah"), ("mah", "mah"), ("وات", "w"), ("w", "w"),
-    ("اینچ", "in"), ("اینچی", "in"), ("inch", "in"), ("هرتز", "hz"), ("hz", "hz"), ("ولت", "v"), ("v", "v"), ("متر", "m"), ("متری", "m"), ("سانت", "cm"), ("سانتی", "cm"), ("cm", "cm"),
+    ("گیگ", "gb"),
+    ("گیگابایت", "gb"),
+    ("gb", "gb"),
+    ("ترابایت", "tb"),
+    ("ترا", "tb"),
+    ("tb", "tb"),
+    ("مگاپیکسل", "mp"),
+    ("mp", "mp"),
+    ("میلی\u{200c}آمپر", "mah"),
+    ("mah", "mah"),
+    ("وات", "w"),
+    ("w", "w"),
+    ("اینچ", "in"),
+    ("اینچی", "in"),
+    ("inch", "in"),
+    ("هرتز", "hz"),
+    ("hz", "hz"),
+    ("ولت", "v"),
+    ("v", "v"),
+    ("متر", "m"),
+    ("متری", "m"),
+    ("سانت", "cm"),
+    ("سانتی", "cm"),
+    ("cm", "cm"),
 ];
 /// Words that make a different model of the same line: (spelling, canonical).
 const VARIANTS: &[(&str, &str)] = &[
-    ("pro", "pro"), ("پرو", "pro"), ("max", "max"), ("مکس", "max"), ("plus", "plus"), ("پلاس", "plus"), ("ultra", "ultra"), ("الترا", "ultra"), ("اولترا", "ultra"),
-    ("mini", "mini"), ("مینی", "mini"), ("lite", "lite"), ("لایت", "lite"), ("fe", "fe"), ("neo", "neo"), ("نئو", "neo"),
+    ("pro", "pro"),
+    ("پرو", "pro"),
+    ("max", "max"),
+    ("مکس", "max"),
+    ("plus", "plus"),
+    ("پلاس", "plus"),
+    ("ultra", "ultra"),
+    ("الترا", "ultra"),
+    ("اولترا", "ultra"),
+    ("mini", "mini"),
+    ("مینی", "mini"),
+    ("lite", "lite"),
+    ("لایت", "lite"),
+    ("fe", "fe"),
+    ("neo", "neo"),
+    ("نئو", "neo"),
 ];
 /// Words that say nothing about which product it is.
 const STOP: &[&str] = &[
-    "مدل", "رنگ", "نیم", "سایز", "ظرفیت", "حافظه", "رم", "داخلی", "نسخه", "سری", "کد", "اصلی", "اصل", "اورجینال", "گارانتی", "ضمانت", "همراه", "با", "و", "از", "در", "به", "برای",
-    "مشکی", "سفید", "آبی", "قرمز", "سبز", "زرد", "طوسی", "خاکستری", "نقره", "نقره\u{200c}ای", "طلایی", "صورتی", "بنفش", "سرمه", "سرمه\u{200c}ای", "black", "white", "blue",
+    "مدل",
+    "رنگ",
+    "نیم",
+    "سایز",
+    "ظرفیت",
+    "حافظه",
+    "رم",
+    "داخلی",
+    "نسخه",
+    "سری",
+    "کد",
+    "اصلی",
+    "اصل",
+    "اورجینال",
+    "گارانتی",
+    "ضمانت",
+    "همراه",
+    "با",
+    "و",
+    "از",
+    "در",
+    "به",
+    "برای",
+    "مشکی",
+    "سفید",
+    "آبی",
+    "قرمز",
+    "سبز",
+    "زرد",
+    "طوسی",
+    "خاکستری",
+    "نقره",
+    "نقره\u{200c}ای",
+    "طلایی",
+    "صورتی",
+    "بنفش",
+    "سرمه",
+    "سرمه\u{200c}ای",
+    "black",
+    "white",
+    "blue",
 ];
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Spec {
-    pub brand: String,       // brand_key, "" = unknown
-    pub size: Option<f64>,   // grams / millilitres
-    pub count: Option<u32>,  // pieces in the pack
-    pub codes: Vec<String>,  // letter+digit model codes: a55, 5g, s24
-    pub numbers: Vec<String>, // bare numbers: «آیفون 15», «سری 7»
+    pub brand: String,                // brand_key, "" = unknown
+    pub size: Option<f64>,            // grams / millilitres
+    pub count: Option<u32>,           // pieces in the pack
+    pub codes: Vec<String>,           // letter+digit model codes: a55, 5g, s24
+    pub numbers: Vec<String>,         // bare numbers: «آیفون 15», «سری 7»
     pub units: Vec<(String, String)>, // (unit, value): (gb, 256), (in, 55)
     pub variants: Vec<String>,
     pub words: Vec<String>,
@@ -43,7 +137,11 @@ pub struct Spec {
 /// Tokens of a title: one spelling (`norm`), decimals kept together («1.5»).
 fn tokens(s: &str) -> Vec<String> {
     let n = norm(s).replace(['٫', '/'], ".");
-    let mut out: Vec<String> = n.split(|c: char| !(c.is_alphanumeric() || c == '.')).map(|t| t.trim_matches('.').to_string()).filter(|t| !t.is_empty()).collect();
+    let mut out: Vec<String> = n
+        .split(|c: char| !(c.is_alphanumeric() || c == '.'))
+        .map(|t| t.trim_matches('.').to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
     // «4G»/«5G» stay codes; a number glued to a unit («256GB», «500گرمی») splits into number + unit
     let mut split = vec![];
     for t in out.drain(..) {
@@ -66,7 +164,11 @@ fn is_num(t: &str) -> bool {
 
 pub fn spec(title: &str, brand: &str) -> Spec {
     let t = tokens(title);
-    let mut s = Spec { brand: brand_key(brand), size: size_grams(title), ..Default::default() };
+    let mut s = Spec {
+        brand: brand_key(brand),
+        size: size_grams(title),
+        ..Default::default()
+    };
     let n = norm(title);
     if s.size.is_none() && (n.contains("نیم کیلو") || n.contains("نیم کیلوگرم")) {
         s.size = Some(500.0);
@@ -174,7 +276,11 @@ pub fn similarity(a: &Spec, b: &Spec) -> f64 {
     let (short, long) = if a.words.len() <= b.words.len() { (a, b) } else { (b, a) };
     let hit = found(&short.words, &long.words) as f64;
     let cov = if short.words.is_empty() { 0.0 } else { hit / short.words.len() as f64 };
-    let dice = if a.words.len() + b.words.len() == 0 { 0.0 } else { 2.0 * hit / (a.words.len() + b.words.len()) as f64 };
+    let dice = if a.words.len() + b.words.len() == 0 {
+        0.0
+    } else {
+        2.0 * hit / (a.words.len() + b.words.len()) as f64
+    };
     let mut score = 0.5 * cov + 0.5 * dice;
     // the same model code on both sides is strong evidence
     if !a.codes.is_empty() && a.codes == b.codes && cov >= 0.5 {
@@ -240,9 +346,14 @@ pub fn group(offers: &[Offer]) -> Vec<Group> {
             platforms.sort();
             platforms.dedup();
             // the name: the most specific (most codes), then the shortest full title
-            let rep = *m.iter().max_by_key(|&&i| (specs[i].codes.len() + specs[i].units.len(), std::cmp::Reverse(offers[i].title.chars().count()))).unwrap_or(&m[0]);
+            let rep = *m
+                .iter()
+                .max_by_key(|&&i| (specs[i].codes.len() + specs[i].units.len(), std::cmp::Reverse(offers[i].title.chars().count())))
+                .unwrap_or(&m[0]);
             let mut brands: BTreeMap<&str, usize> = BTreeMap::new();
-            m.iter().filter(|&&i| !offers[i].brand.is_empty()).for_each(|&i| *brands.entry(offers[i].brand.as_str()).or_default() += 1);
+            m.iter()
+                .filter(|&&i| !offers[i].brand.is_empty())
+                .for_each(|&i| *brands.entry(offers[i].brand.as_str()).or_default() += 1);
             let (min, max) = (prices[0], prices[prices.len() - 1]);
             Group {
                 title: offers[rep].title.clone(),
@@ -252,12 +363,22 @@ pub fn group(offers: &[Offer]) -> Vec<Group> {
                 min,
                 median: crate::market::pct(&prices, 0.5),
                 max,
-                spread_pct: if min > 0 { ((max - min) as f64 * 1000.0 / min as f64).round() / 10.0 } else { 0.0 },
+                spread_pct: if min > 0 {
+                    ((max - min) as f64 * 1000.0 / min as f64).round() / 10.0
+                } else {
+                    0.0
+                },
                 offers: m,
             }
         })
         .collect();
-    out.sort_by(|a, b| b.platforms.len().cmp(&a.platforms.len()).then(b.offers.len().cmp(&a.offers.len())).then(b.spread_pct.total_cmp(&a.spread_pct)));
+    out.sort_by(|a, b| {
+        b.platforms
+            .len()
+            .cmp(&a.platforms.len())
+            .then(b.offers.len().cmp(&a.offers.len()))
+            .then(b.spread_pct.total_cmp(&a.spread_pct))
+    });
     out
 }
 
@@ -314,7 +435,12 @@ pub fn search_query(name: &str, brand: &str) -> String {
     }
     // the words in the order the name has them
     let t = tokens(name);
-    let keep: Vec<&String> = t.iter().filter(|w| s.words.contains(w) || s.codes.contains(w) || s.variants.iter().any(|v| VARIANTS.iter().any(|(x, c)| x == w && c == v)) || s.numbers.contains(w)).collect();
+    let keep: Vec<&String> = t
+        .iter()
+        .filter(|w| {
+            s.words.contains(w) || s.codes.contains(w) || s.variants.iter().any(|v| VARIANTS.iter().any(|(x, c)| x == w && c == v)) || s.numbers.contains(w)
+        })
+        .collect();
     for w in keep {
         if parts.len() >= 6 {
             break;
@@ -335,7 +461,13 @@ mod tests {
     use super::*;
 
     fn o(platform: &str, title: &str, brand: &str, price: i64) -> Offer {
-        Offer { platform: platform.into(), title: title.into(), brand: brand.into(), price, ..Default::default() }
+        Offer {
+            platform: platform.into(),
+            title: title.into(),
+            brand: brand.into(),
+            price,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -405,6 +537,9 @@ mod tests {
         let (m, c) = match_item("کیسه فریزر ماهی ۱۰۰ عددی", "", &offers);
         assert!(m.is_empty() && c == "none", "{m:?}");
         assert_eq!(search_query("کیسه فریزر آغوش 100 عددی سایز متوسط درجه یک", ""), "کیسه فریزر آغوش");
-        assert_eq!(search_query("گوشی سامسونگ Galaxy A55 5G ظرفیت 256 گیگ", "سامسونگ"), "سامسونگ گوشی galaxy a55 5g");
+        assert_eq!(
+            search_query("گوشی سامسونگ Galaxy A55 5G ظرفیت 256 گیگ", "سامسونگ"),
+            "سامسونگ گوشی galaxy a55 5g"
+        );
     }
 }

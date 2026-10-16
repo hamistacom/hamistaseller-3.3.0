@@ -1,6 +1,6 @@
 [package]
 name = "hamista-seller"
-version = "3.1.0"
+version = "3.3.0"
 edition = "2021"
 description = "هامیستا سلر — سامانه استخراج اطلاعات مشتریان و کسب‌وکارها"
 authors = ["Hamista Creative Agency <hamista.ir>"]

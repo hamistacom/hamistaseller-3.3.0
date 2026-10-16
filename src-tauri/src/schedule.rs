@@ -78,7 +78,9 @@ pub fn next_run(db: &Db, every: &str, at: &str, weekday: i64, on_date: &str) -> 
 pub fn list(db: &Db) -> Res<Vec<Schedule>> {
     let c = db.c();
     let mut st = c
-        .prepare(&format!("SELECT {COLS} FROM schedules ORDER BY enabled DESC, CASE WHEN next_run='' THEN 1 ELSE 0 END, next_run, id DESC"))
+        .prepare(&format!(
+            "SELECT {COLS} FROM schedules ORDER BY enabled DESC, CASE WHEN next_run='' THEN 1 ELSE 0 END, next_run, id DESC"
+        ))
         .map_err(err)?;
     let rows = st.query_map([], to_schedule).map_err(err)?.collect::<Result<Vec<_>, _>>().map_err(err)?;
     Ok(rows)
@@ -119,7 +121,13 @@ pub fn save(db: &Db, s: &Schedule) -> Res<i64> {
     if s.every == "once" && next.is_empty() {
         return Err("زمان انتخاب‌شده گذشته است.".into());
     }
-    let req = serde_json::to_string(&ScanRequest { first_limit: 0, lookups: vec![], rest: vec![], ..s.req.clone() }).map_err(err)?;
+    let req = serde_json::to_string(&ScanRequest {
+        first_limit: 0,
+        lookups: vec![],
+        rest: vec![],
+        ..s.req.clone()
+    })
+    .map_err(err)?;
     let c = db.c();
     if s.id == 0 {
         c.execute(
@@ -140,7 +148,11 @@ pub fn save(db: &Db, s: &Schedule) -> Res<i64> {
 
 pub fn set_enabled(db: &Db, id: i64, on: bool) -> Res<()> {
     let s = get(db, id)?;
-    let next = if on { next_run(db, &s.every, &s.at, s.weekday, &s.on_date) } else { String::new() };
+    let next = if on {
+        next_run(db, &s.every, &s.at, s.weekday, &s.on_date)
+    } else {
+        String::new()
+    };
     if on && next.is_empty() {
         return Err("زمان این اجرای یک‌باره گذشته است؛ تاریخ تازه‌ای بگذارید.".into());
     }
@@ -173,7 +185,11 @@ pub fn due(db: &Db) -> Option<Schedule> {
 /// Records the run and moves the schedule on (a one-off is switched off).
 pub fn finished(db: &Db, id: i64, result: &str) {
     let Ok(s) = get(db, id) else { return };
-    let next = if s.every == "once" { String::new() } else { next_run(db, &s.every, &s.at, s.weekday, &s.on_date) };
+    let next = if s.every == "once" {
+        String::new()
+    } else {
+        next_run(db, &s.every, &s.at, s.weekday, &s.on_date)
+    };
     let _ = db.c().execute(
         "UPDATE schedules SET last_run=strftime('%Y-%m-%d %H:%M','now','localtime'), last_result=?1, next_run=?2,
            enabled=CASE WHEN every='once' THEN 0 ELSE enabled END WHERE id=?3",
