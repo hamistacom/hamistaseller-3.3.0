@@ -121,7 +121,17 @@ pub fn customer_save(db: &Db, c: &Customer) -> Res<i64> {
     let status = if c.status == "paused" { "paused" } else { "active" };
     let machine = clean_machine(&c.machine)?;
     let conn = db.c();
-    let args = params![name, c.phone.trim(), c.email.trim(), machine, c.plan.trim(), c.expires.trim(), status, c.note.trim(), c.cloud_user.trim()];
+    let args = params![
+        name,
+        c.phone.trim(),
+        c.email.trim(),
+        machine,
+        c.plan.trim(),
+        c.expires.trim(),
+        status,
+        c.note.trim(),
+        c.cloud_user.trim()
+    ];
     if c.id == 0 {
         conn.execute(
             "INSERT INTO adm_customers(name,phone,email,machine,plan,expires,status,note,cloud_user) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
@@ -134,7 +144,18 @@ pub fn customer_save(db: &Db, c: &Customer) -> Res<i64> {
             .execute(
                 "UPDATE adm_customers SET name=?1,phone=?2,email=?3,machine=?4,plan=?5,expires=?6,status=?7,note=?8,cloud_user=?9,
                    updated_at=datetime('now','localtime') WHERE id=?10",
-                params![name, c.phone.trim(), c.email.trim(), machine, c.plan.trim(), c.expires.trim(), status, c.note.trim(), c.cloud_user.trim(), c.id],
+                params![
+                    name,
+                    c.phone.trim(),
+                    c.email.trim(),
+                    machine,
+                    c.plan.trim(),
+                    c.expires.trim(),
+                    status,
+                    c.note.trim(),
+                    c.cloud_user.trim(),
+                    c.id
+                ],
             )
             .map_err(err)?;
         if n == 0 {
@@ -168,12 +189,21 @@ pub fn issue(db: &Db, customer_id: i64, machine: &str, name: &str, plan: &str, e
         // same PC issued before → same customer card
         let known: Option<i64> = db
             .c()
-            .query_row("SELECT id FROM adm_customers WHERE machine=?1 ORDER BY id DESC LIMIT 1", [&machine], |r| r.get(0))
+            .query_row("SELECT id FROM adm_customers WHERE machine=?1 ORDER BY id DESC LIMIT 1", [&machine], |r| {
+                r.get(0)
+            })
             .optional()
             .map_err(err)?;
         let mut c = match known {
             Some(id) => customer(db, id)?,
-            None => Customer { name: if name.trim().is_empty() { "بدون نام".into() } else { name.trim().into() }, ..Default::default() },
+            None => Customer {
+                name: if name.trim().is_empty() {
+                    "بدون نام".into()
+                } else {
+                    name.trim().into()
+                },
+                ..Default::default()
+            },
         };
         (c.machine, c.plan, c.expires) = (machine.clone(), plan.trim().into(), expires.trim().into());
         customer_save(db, &c)?
@@ -241,16 +271,42 @@ pub fn stats(db: &Db) -> Res<Stats> {
 /// Customer registry as CSV text (UTF-8 BOM for Excel; formula-looking cells neutralised).
 pub fn customers_csv(db: &Db) -> Res<String> {
     let cell = |s: &str| {
-        let s = if s.starts_with(['=', '+', '-', '@']) { format!("'{s}") } else { s.to_string() };
+        let s = if s.starts_with(['=', '+', '-', '@']) {
+            format!("'{s}")
+        } else {
+            s.to_string()
+        };
         format!("\"{}\"", s.replace('"', "\"\""))
     };
     let mut out = String::from("\u{feff}");
-    out += &["نام", "تلفن", "ایمیل", "کد سیستم", "نوع", "اعتبار تا", "وضعیت", "حساب آنلاین", "تعداد لایسنس", "یادداشت"]
-        .map(cell)
-        .join(",");
+    out += &[
+        "نام",
+        "تلفن",
+        "ایمیل",
+        "کد سیستم",
+        "نوع",
+        "اعتبار تا",
+        "وضعیت",
+        "حساب آنلاین",
+        "تعداد لایسنس",
+        "یادداشت",
+    ]
+    .map(cell)
+    .join(",");
     out += "\r\n";
     for c in customers(db, "", "all")? {
-        let row = [&c.name, &c.phone, &c.email, &c.machine, &c.plan, &c.expires, &c.status, &c.cloud_user, &c.licenses.to_string(), &c.note];
+        let row = [
+            &c.name,
+            &c.phone,
+            &c.email,
+            &c.machine,
+            &c.plan,
+            &c.expires,
+            &c.status,
+            &c.cloud_user,
+            &c.licenses.to_string(),
+            &c.note,
+        ];
         out += &row.map(|v| cell(v)).join(",");
         out += "\r\n";
     }

@@ -29,8 +29,15 @@ pub fn fa_num(n: f64) -> String {
         out.push('٫');
         out.push_str(&frac.to_string());
     }
-    let fa: String = out.chars().map(|c| c.to_digit(10).map_or(c, |d| char::from_u32(0x06F0 + d).unwrap_or(c))).collect();
-    if neg && fa != "۰" { format!("-{fa}") } else { fa }
+    let fa: String = out
+        .chars()
+        .map(|c| c.to_digit(10).map_or(c, |d| char::from_u32(0x06F0 + d).unwrap_or(c)))
+        .collect();
+    if neg && fa != "۰" {
+        format!("-{fa}")
+    } else {
+        fa
+    }
 }
 
 /// Any written form -> canonical Iranian number (`09121234567`, `02188776655`).
@@ -912,7 +919,10 @@ pub fn plan_queries(keyword: &str, province: &str, city: &str) -> Vec<String> {
 
 /// Address as shown by the map page, without icon-font glyphs, stray marks and doubled commas.
 pub fn clean_address(s: &str) -> String {
-    let s: String = s.chars().filter(|c| !('\u{E000}'..='\u{F8FF}').contains(c) && !matches!(c, '\u{200E}' | '\u{200F}' | '\u{FFFD}')).collect();
+    let s: String = s
+        .chars()
+        .filter(|c| !('\u{E000}'..='\u{F8FF}').contains(c) && !matches!(c, '\u{200E}' | '\u{200F}' | '\u{FFFD}'))
+        .collect();
     let mut out = String::new();
     for part in s.split([',', '،']).map(str::trim).filter(|p| !p.is_empty()) {
         if !out.is_empty() {
@@ -929,7 +939,12 @@ pub fn city_in(address: &str, city: &str, areas: &[String]) -> String {
     if !city.trim().is_empty() {
         return city.trim().to_string();
     }
-    areas.iter().map(|a| a.trim()).find(|a| !a.is_empty() && address.contains(a)).unwrap_or("").to_string()
+    areas
+        .iter()
+        .map(|a| a.trim())
+        .find(|a| !a.is_empty() && address.contains(a))
+        .unwrap_or("")
+        .to_string()
 }
 
 /// Only an https picture from the map provider's image host is kept (the card shows it).
@@ -1206,10 +1221,21 @@ pub fn html_unescape(s: &str) -> String {
 /// http(s) links written as plain text (bios, channel descriptions).
 pub fn links_in_text(text: &str) -> Vec<String> {
     text.split(|c: char| c.is_whitespace() || "()<>«»\"'،".contains(c))
-        .filter(|w| w.starts_with("http://") || w.starts_with("https://") || w.starts_with("www.") || w.starts_with("t.me/") || w.starts_with("wa.me/") || w.starts_with("instagram.com/"))
+        .filter(|w| {
+            w.starts_with("http://")
+                || w.starts_with("https://")
+                || w.starts_with("www.")
+                || w.starts_with("t.me/")
+                || w.starts_with("wa.me/")
+                || w.starts_with("instagram.com/")
+        })
         .map(|w| {
             let w = w.trim_end_matches(['.', ',', '!', '؟']);
-            if w.starts_with("http") { w.to_string() } else { format!("https://{w}") }
+            if w.starts_with("http") {
+                w.to_string()
+            } else {
+                format!("https://{w}")
+            }
         })
         .collect()
 }
@@ -1223,7 +1249,6 @@ mod tests {
         assert_eq!(super::fa_num(5.0), "۵");
     }
 
-
     #[test]
     fn business_name_matching() {
         assert!(same_business("کافه روبرتو", "كافه روبرتو"));
@@ -1235,17 +1260,30 @@ mod tests {
         assert!(!same_business("هتل تهران", "هتل اسپیناس"), "the city in a name is not a match");
         assert!(!same_business("نانوایی سنگکی تهران", "نانوایی سنگکی بربری"));
         assert_eq!(name_key("كافه  روبرتو"), name_key("کافه روبرتو"));
-        assert_eq!(meta_content(r#"<meta property="og:title" content="Caf&amp;e &#1705;&#x627;"><meta name="x" content="y">"#, "og:title").as_deref(), Some("Caf&e کا"));
+        assert_eq!(
+            meta_content(
+                r#"<meta property="og:title" content="Caf&amp;e &#1705;&#x627;"><meta name="x" content="y">"#,
+                "og:title"
+            )
+            .as_deref(),
+            Some("Caf&e کا")
+        );
         assert_eq!(html_unescape("a &unknown; & b&lt;"), "a &unknown; & b<");
         assert_eq!(html_unescape("&کافهٔ طولانی;"), "&کافهٔ طولانی;"); // no panic on multibyte text after &
-        assert_eq!(links_in_text("سفارش: https://lamiz.ir/menu، کانال t.me/lamiz."), vec!["https://lamiz.ir/menu", "https://t.me/lamiz"]);
+        assert_eq!(
+            links_in_text("سفارش: https://lamiz.ir/menu، کانال t.me/lamiz."),
+            vec!["https://lamiz.ir/menu", "https://t.me/lamiz"]
+        );
     }
 
     use super::*;
 
     #[test]
     fn address_city_photo() {
-        assert_eq!(clean_address("\u{E0C8} استان چهارمحال و بختیاری، شهرکرد،، بهارستان، ایران"), "استان چهارمحال و بختیاری، شهرکرد، بهارستان، ایران");
+        assert_eq!(
+            clean_address("\u{E0C8} استان چهارمحال و بختیاری، شهرکرد،، بهارستان، ایران"),
+            "استان چهارمحال و بختیاری، شهرکرد، بهارستان، ایران"
+        );
         let areas = vec!["بروجن".to_string(), "شهرکرد".to_string()];
         assert_eq!(city_in("XV4R+XFV، بروجن، استان چهارمحال و بختیاری", "", &areas), "بروجن");
         assert_eq!(city_in("تهران", " کرج ", &areas), "کرج");

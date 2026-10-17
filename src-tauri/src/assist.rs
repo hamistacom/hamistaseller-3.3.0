@@ -7,15 +7,13 @@ use crate::logic::chat_link;
 use std::path::Path;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
-pub const APPS: [(&str, &str); 4] = [
-    ("whatsapp", "واتساپ"),
-    ("telegram", "تلگرام"),
-    ("eitaa", "ایتا"),
-    ("bale", "بله"),
-];
+pub const APPS: [(&str, &str); 4] = [("whatsapp", "واتساپ"), ("telegram", "تلگرام"), ("eitaa", "ایتا"), ("bale", "بله")];
 
 fn name(which: &str) -> Res<&'static str> {
-    APPS.iter().find(|(k, _)| *k == which).map(|(_, n)| *n).ok_or_else(|| "پیام‌رسان نامعتبر است.".into())
+    APPS.iter()
+        .find(|(k, _)| *k == which)
+        .map(|(_, n)| *n)
+        .ok_or_else(|| "پیام‌رسان نامعتبر است.".into())
 }
 
 fn home_url(which: &str) -> &'static str {

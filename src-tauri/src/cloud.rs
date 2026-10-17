@@ -136,7 +136,9 @@ pub async fn login(db: &Db, url: &str, user: &str, pass: &str) -> Res<license::S
         "username": user.trim(), "password": pass, "machineId": license::machine(),
         "machineName": std::env::var("COMPUTERNAME").unwrap_or_default(), "appVersion": env!("CARGO_PKG_VERSION"),
     });
-    let v = call(&url, "POST", &format!("{API}/auth/login"), None, Some(&body)).await.map_err(CallErr::text)?;
+    let v = call(&url, "POST", &format!("{API}/auth/login"), None, Some(&body))
+        .await
+        .map_err(CallErr::text)?;
     let token = v["token"].as_str().ok_or("پاسخ سرور نامعتبر است.")?;
     db.kv_set("cloud_url", &url)?;
     db.kv_set("cloud_user", user.trim())?;
@@ -158,7 +160,9 @@ pub async fn start_trial(db: &Db, url: &str, name: &str, phone: &str) -> Res<lic
         "machineId": license::machine(), "machineName": std::env::var("COMPUTERNAME").unwrap_or_default(),
         "appVersion": env!("CARGO_PKG_VERSION"), "name": name.trim(), "phone": phone.trim(),
     });
-    let v = call(&url, "POST", &format!("{API}/auth/trial"), None, Some(&body)).await.map_err(CallErr::text)?;
+    let v = call(&url, "POST", &format!("{API}/auth/trial"), None, Some(&body))
+        .await
+        .map_err(CallErr::text)?;
     let token = v["token"].as_str().ok_or("پاسخ سرور نامعتبر است.")?;
     db.kv_set("cloud_url", &url)?;
     db.kv_set("cloud_user", v["username"].as_str().unwrap_or("trial"))?;
@@ -210,7 +214,15 @@ pub async fn consume(db: &Db, kind: &str, n: i64) -> Res<()> {
     }
     let (url, auth) = bearer(db)?; // records use that already happened: callers run `precheck` before starting
     let left_key = format!("quota_left_{kind}");
-    match call(&url, "POST", &format!("{API}/quota/consume"), Some(("authorization", &auth)), Some(&json!({ "kind": kind, "n": n }))).await {
+    match call(
+        &url,
+        "POST",
+        &format!("{API}/quota/consume"),
+        Some(("authorization", &auth)),
+        Some(&json!({ "kind": kind, "n": n })),
+    )
+    .await
+    {
         Ok(v) => {
             if let Some(left) = v[if kind == "scan" { "scanLeft" } else { "sendLeft" }].as_i64() {
                 db.kv_set(&left_key, &left.to_string())?;
@@ -243,7 +255,10 @@ pub fn precheck(db: &Db, kind: &str) -> Res<()> {
     // newest figure: the last consume answer if any (the token only changes at a heartbeat), minus use not yet counted
     let left = kv(db, &format!("quota_left_{kind}")).parse().unwrap_or(token_left) - kv(db, &format!("quota_pending_{kind}")).parse().unwrap_or(0);
     if left <= 0 {
-        return Err(format!("سهمیه {} این ماه تمام شده است. ماه بعد صفر می‌شود یا اشتراک را ارتقا دهید.", if kind == "scan" { "استخراج" } else { "ارسال" }));
+        return Err(format!(
+            "سهمیه {} این ماه تمام شده است. ماه بعد صفر می‌شود یا اشتراک را ارتقا دهید.",
+            if kind == "scan" { "استخراج" } else { "ارسال" }
+        ));
     }
     Ok(())
 }
@@ -258,7 +273,14 @@ async fn flush_pending(db: &Db, url: &str) -> bool {
         if n <= 0 {
             continue;
         }
-        let r = call(url, "POST", &format!("{API}/quota/consume"), Some(("authorization", &auth)), Some(&json!({ "kind": kind, "n": n }))).await;
+        let r = call(
+            url,
+            "POST",
+            &format!("{API}/quota/consume"),
+            Some(("authorization", &auth)),
+            Some(&json!({ "kind": kind, "n": n })),
+        )
+        .await;
         // counted, or over the cap (the server then fills the quota to the cap): settled either way
         if r.is_ok() || matches!(r, Err(CallErr::Denied(429, _))) {
             kv_del(db, &key);
@@ -375,9 +397,15 @@ pub async fn mega_sync(db: &Db) -> Res<i64> {
             break;
         }
         let n = batch.len() as i64;
-        call(&url, "POST", &format!("{API}/megabank/ingest"), Some(("authorization", &auth)), Some(&json!({ "places": batch })))
-            .await
-            .map_err(CallErr::text)?;
+        call(
+            &url,
+            "POST",
+            &format!("{API}/megabank/ingest"),
+            Some(("authorization", &auth)),
+            Some(&json!({ "places": batch })),
+        )
+        .await
+        .map_err(CallErr::text)?;
         db.kv_set("mega_synced", &last.to_string())?;
         sent += n;
         if n < SYNC_BATCH {
@@ -424,7 +452,12 @@ pub fn mega_row_to_place(list_id: i64, r: &Value) -> Place {
         ("rubika", "rubika"),
     ] {
         for v in s(field).split(',').map(str::trim).filter(|v| !v.is_empty()) {
-            contacts.push(crate::db::Contact { kind: kind.into(), value: v.into(), origin: "megabank".into(), ..Default::default() });
+            contacts.push(crate::db::Contact {
+                kind: kind.into(),
+                value: v.into(),
+                origin: "megabank".into(),
+                ..Default::default()
+            });
         }
     }
     Place {
@@ -455,15 +488,23 @@ pub fn mega_import(db: &Db, list_id: i64, rows: &[Value]) -> Res<(usize, usize)>
 
 pub async fn notifications(db: &Db) -> Res<Value> {
     let (url, auth) = bearer(db)?;
-    call(&url, "GET", &format!("{API}/notifications"), Some(("authorization", &auth)), None).await.map_err(CallErr::text)
+    call(&url, "GET", &format!("{API}/notifications"), Some(("authorization", &auth)), None)
+        .await
+        .map_err(CallErr::text)
 }
 
 pub async fn notification_read(db: &Db, id: i64) -> Res<()> {
     let (url, auth) = bearer(db)?;
-    call(&url, "POST", &format!("{API}/notifications/read"), Some(("authorization", &auth)), Some(&json!({ "id": id })))
-        .await
-        .map(|_| ())
-        .map_err(CallErr::text)
+    call(
+        &url,
+        "POST",
+        &format!("{API}/notifications/read"),
+        Some(("authorization", &auth)),
+        Some(&json!({ "id": id })),
+    )
+    .await
+    .map(|_| ())
+    .map_err(CallErr::text)
 }
 
 /// Latest app version the admin published (public endpoint).
@@ -552,7 +593,14 @@ pub fn admin_conn_info(db: &Db) -> AdminConn {
 }
 
 async fn admin_login_raw(url: &str, user: &str, pass: &str) -> Result<String, CallErr> {
-    let v = call(url, "POST", &format!("{API}/admin/login"), None, Some(&json!({ "username": user, "password": pass }))).await?;
+    let v = call(
+        url,
+        "POST",
+        &format!("{API}/admin/login"),
+        None,
+        Some(&json!({ "username": user, "password": pass })),
+    )
+    .await?;
     v["token"].as_str().map(String::from).ok_or(CallErr::Network("پاسخ سرور نامعتبر است.".into()))
 }
 
@@ -622,7 +670,9 @@ pub async fn admin_call(db: &Db, method: &str, path: &str, body: Option<Value>) 
                 }
             };
             seal(db, "admin_token", &token)?;
-            call(&url, method, &full, Some(("x-admin-token", &token)), body.as_ref()).await.map_err(CallErr::text)
+            call(&url, method, &full, Some(("x-admin-token", &token)), body.as_ref())
+                .await
+                .map_err(CallErr::text)
         }
         r => r.map_err(CallErr::text),
     }

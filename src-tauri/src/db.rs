@@ -22,7 +22,7 @@ pub struct Contact {
     pub kind: String, // mobile | landline | email | instagram | telegram | whatsapp | eitaa | bale
     pub value: String,
     pub label: String,
-    pub origin: String, // maps | website | manual | import
+    pub origin: String,   // maps | website | manual | import
     pub delivery: String, // last official send: sent | failed | invalid | no_account
     /// Mobile only: messengers seen for this number, "whatsapp:1,telegram:0" (1 = has an account, 0 = none).
     pub apps: String,
@@ -116,8 +116,8 @@ pub struct Dashboard {
     pub month: i64,      // added in the last 30 days
     pub prev_month: i64, // the 30 days before that
     pub sent_prev_week: i64,
-    pub contacts: i64, // ways to reach (numbers, emails, pages) in all banks
-    pub weekly: Vec<(String, i64)>, // last 12 weeks (week start date), oldest first
+    pub contacts: i64,                    // ways to reach (numbers, emails, pages) in all banks
+    pub weekly: Vec<(String, i64)>,       // last 12 weeks (week start date), oldest first
     pub sources: Vec<(String, i64, i64)>, // source → (all time, last 30 days)
 }
 
@@ -126,7 +126,7 @@ pub struct BankStats {
     pub total: i64,
     pub provinces: Vec<(String, i64)>,
     pub cities: Vec<(String, String, i64)>, // (province, county, count)
-    pub categories: Vec<(String, i64)>,    // line of business
+    pub categories: Vec<(String, i64)>,     // line of business
     pub keywords: Vec<(String, i64)>,
     pub statuses: Vec<(String, i64)>,
     pub channels: Vec<(String, i64)>, // kind → places reachable on it (+ website, person)
@@ -729,7 +729,13 @@ impl Db {
         if f.list_id > 0 {
             sql += &format!(" AND p.list_id={}", f.list_id);
         }
-        for (col, val) in [("keyword", &f.keyword), ("province", &f.province), ("city", &f.city), ("category", &f.category), ("status", &f.status)] {
+        for (col, val) in [
+            ("keyword", &f.keyword),
+            ("province", &f.province),
+            ("city", &f.city),
+            ("category", &f.category),
+            ("status", &f.status),
+        ] {
             if !val.is_empty() {
                 arg(&mut sql, val.clone(), &format!(" AND p.{col}=#"));
             }
@@ -847,9 +853,13 @@ impl Db {
             collect(st.query_map(params_from_iter(args.iter()), |r| Ok((r.get(0)?, r.get(1)?))))
         };
         let by = |col: &str| pairs(format!("SELECT p.{col}, count(*){w} AND p.{col}<>'' GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 200"));
-        let total: i64 = c.query_row(&format!("SELECT count(*){w}"), params_from_iter(args.iter()), |r| r.get(0)).map_err(err)?;
+        let total: i64 = c
+            .query_row(&format!("SELECT count(*){w}"), params_from_iter(args.iter()), |r| r.get(0))
+            .map_err(err)?;
         let mut st = c
-            .prepare(&format!("SELECT p.province, p.city, count(*){w} AND p.city<>'' GROUP BY 1, 2 ORDER BY 3 DESC, 2 LIMIT 300"))
+            .prepare(&format!(
+                "SELECT p.province, p.city, count(*){w} AND p.city<>'' GROUP BY 1, 2 ORDER BY 3 DESC, 2 LIMIT 300"
+            ))
             .map_err(err)?;
         let cities = collect(st.query_map(params_from_iter(args.iter()), |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))))?;
         let mut channels = pairs(format!(
@@ -946,7 +956,11 @@ impl Db {
             .map_err(err)?;
         for back in (0..12).rev() {
             let from = format!("-{} days", 7 * back + 6);
-            let to = if back == 0 { "+1 days".to_string() } else { format!("-{} days", 7 * back - 1) };
+            let to = if back == 0 {
+                "+1 days".to_string()
+            } else {
+                format!("-{} days", 7 * back - 1)
+            };
             let row: (String, i64) = wk.query_row([&from, &to], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?;
             d.weekly.push(row);
         }
@@ -1036,7 +1050,15 @@ impl Db {
         let c = self.c();
         c.execute(
             "INSERT INTO market_runs(query,qkey,brand,offers,median,min,report) VALUES(?1,?2,?3,?4,?5,?6,?7)",
-            params![r.query, crate::market::words(&r.query).join(" "), r.brand, r.offers.len() as i64, r.stats.median, r.stats.min, serde_json::to_string(r).map_err(err)?],
+            params![
+                r.query,
+                crate::market::words(&r.query).join(" "),
+                r.brand,
+                r.offers.len() as i64,
+                r.stats.median,
+                r.stats.min,
+                serde_json::to_string(r).map_err(err)?
+            ],
         )
         .map_err(err)?;
         Ok(c.last_insert_rowid())
@@ -1052,7 +1074,9 @@ impl Db {
                  ORDER BY d DESC LIMIT 180) ORDER BY d",
             )
             .map_err(err)?;
-        collect(st.query_map(params![crate::market::words(query).join(" "), brand.trim()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))))
+        collect(st.query_map(params![crate::market::words(query).join(" "), brand.trim()], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        }))
     }
 
     /// The same history per source: (date, platform name, median) from each day's last snapshot.
@@ -1065,7 +1089,8 @@ impl Db {
                  ORDER BY id DESC LIMIT 180",
             )
             .map_err(err)?;
-        let rows: Vec<(String, Option<String>)> = collect(st.query_map(params![crate::market::words(query).join(" "), brand.trim()], |r| Ok((r.get(0)?, r.get(1)?))))?;
+        let rows: Vec<(String, Option<String>)> =
+            collect(st.query_map(params![crate::market::words(query).join(" "), brand.trim()], |r| Ok((r.get(0)?, r.get(1)?))))?;
         let mut out = vec![];
         for (d, ch) in rows.into_iter().rev() {
             let shares: Vec<crate::market::Share> = ch.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
@@ -1077,12 +1102,17 @@ impl Db {
     /// Recent searches: (id, query, brand, offers, median, created_at).
     pub fn market_runs(&self, limit: i64) -> Res<Vec<crate::market::RunRow>> {
         let c = self.c();
-        let mut st = c.prepare("SELECT id,query,brand,offers,median,created_at FROM market_runs ORDER BY id DESC LIMIT ?1").map_err(err)?;
+        let mut st = c
+            .prepare("SELECT id,query,brand,offers,median,created_at FROM market_runs ORDER BY id DESC LIMIT ?1")
+            .map_err(err)?;
         collect(st.query_map([limit], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))))
     }
 
     pub fn market_get(&self, id: i64) -> Res<crate::market::Report> {
-        let raw: String = self.c().query_row("SELECT report FROM market_runs WHERE id=?1", [id], |r| r.get(0)).map_err(err)?;
+        let raw: String = self
+            .c()
+            .query_row("SELECT report FROM market_runs WHERE id=?1", [id], |r| r.get(0))
+            .map_err(err)?;
         let mut r: crate::market::Report = serde_json::from_str(&raw).map_err(err)?;
         r.id = id;
         r.history = self.market_history(&r.query, &r.brand)?;
@@ -1095,10 +1125,13 @@ impl Db {
     pub fn market_trends(&self, days: i64) -> Res<Vec<crate::market::Trend>> {
         let c = self.c();
         let mut st = c
-            .prepare("SELECT id,query,qkey,median,report,created_at FROM market_runs WHERE brand='' AND created_at >= datetime('now','localtime', ?1) ORDER BY id")
+            .prepare(
+                "SELECT id,query,qkey,median,report,created_at FROM market_runs WHERE brand='' AND created_at >= datetime('now','localtime', ?1) ORDER BY id",
+            )
             .map_err(err)?;
-        let rows: Vec<(i64, String, String, i64, String, String)> =
-            collect(st.query_map([format!("-{days} days")], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))))?;
+        let rows: Vec<(i64, String, String, i64, String, String)> = collect(st.query_map([format!("-{days} days")], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
+        }))?;
         let mut by: Vec<crate::market::Trend> = vec![];
         for (id, query, qkey, median, report, at) in rows {
             let channels: Vec<crate::market::Share> = serde_json::from_str::<Value>(&report)
@@ -1114,7 +1147,16 @@ impl Db {
                     t.last_id = id;
                     t.channels = channels;
                 }
-                None => by.push(crate::market::Trend { key: qkey, query, searches: 1, first_median: median, last_median: median, last_at: at, last_id: id, channels }),
+                None => by.push(crate::market::Trend {
+                    key: qkey,
+                    query,
+                    searches: 1,
+                    first_median: median,
+                    last_median: median,
+                    last_at: at,
+                    last_id: id,
+                    channels,
+                }),
             }
         }
         by.sort_by(|a, b| b.searches.cmp(&a.searches).then_with(|| b.last_at.cmp(&a.last_at)));
@@ -1131,9 +1173,14 @@ impl Db {
     pub fn set_app(&self, contact_id: i64, app: &str, has: bool) -> Res<()> {
         let c = self.c();
         let cur: String = c.query_row("SELECT apps FROM contacts WHERE id=?1", [contact_id], |r| r.get(0)).map_err(err)?;
-        let mut parts: Vec<String> = cur.split(',').filter(|x| !x.is_empty() && x.split(':').next() != Some(app)).map(String::from).collect();
+        let mut parts: Vec<String> = cur
+            .split(',')
+            .filter(|x| !x.is_empty() && x.split(':').next() != Some(app))
+            .map(String::from)
+            .collect();
         parts.push(format!("{app}:{}", u8::from(has)));
-        c.execute("UPDATE contacts SET apps=?1 WHERE id=?2", params![parts.join(","), contact_id]).map_err(err)?;
+        c.execute("UPDATE contacts SET apps=?1 WHERE id=?2", params![parts.join(","), contact_id])
+            .map_err(err)?;
         Ok(())
     }
 

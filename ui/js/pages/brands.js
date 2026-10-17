@@ -1,7 +1,7 @@
 // «تحلیل برند»: our brand and competitors — brand health index on four pillars (market presence,
 // perceived quality, digital presence, social), price positioning, a positioning map, and actions.
 import { h, icon, invoke, fa, clear, safe, input, field, toggle, toast, modal, confirmBox, ago, newChannel } from "../core.js";
-import { pbadge } from "./market.js";
+import { pbadge, confBadge } from "./market.js";
 import { go } from "../state.js";
 
 const PILLARS = [
@@ -274,7 +274,46 @@ function detail(b, own) {
   return h(
     "div",
     { class: "stack" },
-    h("h2", {}, `جزئیات «${b.name}»`),
+    h(
+      "div",
+      { class: "row between wrap" },
+      h("h2", {}, `جزئیات «${b.name}»`),
+      r.confidence != null ? confBadge(r.confidence, "اعتماد داده") : null,
+    ),
+    // ambiguous name: show the entities we actually found instead of guessing
+    r.candidates?.length
+      ? h(
+          "div",
+          { class: "card stack" },
+          h("div", { class: "card-h" }, h("h2", {}, "احتمالاً منظور شما یکی از این‌هاست؟"), h("span", { class: "small muted" }, "نام این برند چند هویت نزدیک دارد؛ برای دقت بیشتر، نام دقیق‌تر یا سایت/اینستاگرام را در ویرایش برند وارد کنید.")),
+          h(
+            "div",
+            { class: "cand-grid" },
+            r.candidates.map((c) =>
+              h(
+                "div",
+                { class: "cand-card" },
+                h("div", { class: "row between" }, h("b", {}, c.name), h("span", { class: "pill" }, c.kind)),
+                h("span", { class: "small muted" }, c.detail),
+                h(
+                  "div",
+                  { class: "row" },
+                  c.url ? h("button", { class: "btn ghost sm", type: "button", onclick: () => safe(invoke("open_url", { url: c.url })) }, icon("external", "sm"), "مشاهده") : null,
+                ),
+              ),
+            ),
+          ),
+        )
+      : null,
+    r.signals?.length
+      ? h(
+          "details",
+          { class: "card stack tight" },
+          h("summary", {}, icon("info", "sm"), `اعتماد داده: ${fa(r.confidence || 0)}٪ — بر چه پایه‌ای؟`),
+          h("div", { class: "pbars" }, r.signals.map((sg) => h("div", { class: "pbar" }, h("span", {}, sg.label), h("span", { class: "track" }, (() => { const f = h("i", { class: sg.score >= 70 ? "good" : sg.score >= 45 ? "mid" : "low" }); requestAnimationFrame(() => (f.style.width = `${sg.score}%`)); return f; })()), h("b", {}, fa(sg.score))))),
+          r.evidence?.length ? h("div", { class: "stack tight" }, h("span", { class: "label-t" }, "منبع داده‌ها:"), r.evidence.map((e) => h("p", { class: "small muted" }, `• ${e.fact} — ${e.source}`, e.url ? h("button", { class: "seller-link", type: "button", onclick: () => safe(invoke("open_url", { url: e.url })) }, " مشاهده") : null))) : null,
+        )
+      : null,
     h(
       "div",
       { class: "mkt-grid" },

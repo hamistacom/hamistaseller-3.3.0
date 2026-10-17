@@ -101,7 +101,11 @@ impl ScanRequest {
 
     /// City shown in the history: the exact district when there is one.
     pub fn run_city(&self) -> String {
-        if self.district.trim().is_empty() { self.city.trim().to_string() } else { self.area() }
+        if self.district.trim().is_empty() {
+            self.city.trim().to_string()
+        } else {
+            self.area()
+        }
     }
 
     /// Search queries for one keyword, and whether they are exactly what the user asked for
@@ -186,7 +190,8 @@ pub fn detect_browser(custom: &str) -> Option<String> {
     browsers(custom).into_iter().next()
 }
 
-const CAPTCHA_WAIT: &str = "منبع داده تأیید «ربات نیستم» خواست. یک پنجره مرورگر باز شد؛ تأیید را در آن انجام دهید یا دکمه «ادامه» را بزنید تا استخراج ادامه پیدا کند.";
+const CAPTCHA_WAIT: &str =
+    "منبع داده تأیید «ربات نیستم» خواست. یک پنجره مرورگر باز شد؛ تأیید را در آن انجام دهید یا دکمه «ادامه» را بزنید تا استخراج ادامه پیدا کند.";
 const CAPTCHA_GIVE_UP: &str = "منبع داده چند بار پشت‌سرهم تأیید خواست. چند دقیقه صبر کنید یا تعداد تب‌ها را در تنظیمات کم کنید؛ داده‌های ذخیره‌شده حفظ شده‌اند.";
 const BROWSER_DIED: &str = "مرورگر چند بار از کار افتاد؛ داده‌های ذخیره‌شده حفظ شده‌اند.";
 const ENRICHERS: usize = 4;
@@ -328,6 +333,60 @@ pub(crate) struct Engine {
     pub(crate) list: Page,
     pub(crate) workers: Vec<Page>,
     pub(crate) proc: Proc,
+    /// Holds the shared browser profile for this job while the browser is open (see `Lease`).
+    pub(crate) _lease: Option<Lease>,
+}
+
+tokio::task_local! {
+    /// The job (commands.rs job registry) the current task belongs to; 0 outside a job.
+    pub static JOB_ID: u64;
+}
+
+/// The id of the job running this task (0 when not inside a job).
+pub fn job_id() -> u64 {
+    JOB_ID.try_with(|v| *v).unwrap_or(0)
+}
+
+/// One browser profile (logins, cookies) is shared by every job, but a profile can only be open in
+/// one browser at a time. Jobs therefore take turns: a job holds the profile while any of its
+/// browsers is open; another job's `launch` waits (cancellable) until it is released. The same job
+/// may launch again (e.g. a visible window after closing its headless one).
+static PROFILE: Mutex<Option<(u64, usize)>> = Mutex::new(None);
+
+pub(crate) struct Lease(u64);
+
+impl Lease {
+    fn try_take(job: u64) -> Option<Lease> {
+        let mut g = PROFILE.lock().unwrap_or_else(|e| e.into_inner());
+        match *g {
+            None => *g = Some((job, 1)),
+            Some((owner, n)) if owner == job => *g = Some((job, n + 1)),
+            Some(_) => return None,
+        }
+        Some(Lease(job))
+    }
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        let mut g = PROFILE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((owner, n)) = *g {
+            if owner == self.0 {
+                *g = if n > 1 { Some((owner, n - 1)) } else { None };
+            }
+        }
+    }
+}
+
+/// Waits until this job may open the shared browser profile (callers race their Stop token).
+async fn take_profile() -> Lease {
+    let job = job_id();
+    loop {
+        if let Some(l) = Lease::try_take(job) {
+            return l;
+        }
+        sleep(Duration::from_millis(250)).await;
+    }
 }
 
 /// The browser process we started; killed when dropped so no browser is ever left behind.
@@ -357,6 +416,8 @@ pub(crate) async fn launch(s: &Settings, profile: &Path, headless: bool, tabs: u
     while matches!(CLEANING.try_lock(), Err(std::sync::TryLockError::WouldBlock)) {
         sleep(Duration::from_millis(100)).await;
     }
+    // another job has the browser profile open: wait for it (the caller races its own Stop token)
+    let mut lease = Some(take_profile().await);
     let browsers = browsers(&s.browser_path);
     if browsers.is_empty() {
         return Err("مرورگر Edge یا Chrome پیدا نشد. یکی از آن‌ها را نصب کنید یا مسیر آن را در «تنظیمات ← عمومی» وارد کنید.".into());
@@ -368,7 +429,10 @@ pub(crate) async fn launch(s: &Settings, profile: &Path, headless: bool, tabs: u
         let fresh = profile.with_file_name(format!("browser-profile-{secs}"));
         for dir in [profile, fresh.as_path()] {
             match launch_in(exe, dir, headless, tabs).await {
-                Ok(e) => return Ok(e),
+                Ok(mut e) => {
+                    e._lease = lease.take();
+                    return Ok(e);
+                }
                 Err(e) => {
                     crate::log_line("WARN", &format!("browser launch failed ({exe}, {}): {e}", dir.display()));
                     kill_profile_users(dir);
@@ -445,7 +509,10 @@ fn kill_profile_users(profile: &Path) {
         let ps = format!(
             "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | Where-Object {{ $_.CommandLine -and $_.CommandLine.Contains('{dir}') }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}"
         );
-        let _ = std::process::Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &ps]).creation_flags(0x0800_0000).output();
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &ps])
+            .creation_flags(0x0800_0000)
+            .output();
     }
     #[cfg(not(windows))]
     let _ = profile;
@@ -468,30 +535,29 @@ async fn launch_in(exe: &str, profile: &Path, headless: bool, tabs: usize) -> Re
     }
     let log = std::fs::File::create(profile.with_file_name("browser-last.log")).ok();
     let mut cmd = std::process::Command::new(exe);
-    cmd.arg(format!("--user-data-dir={}", profile.display()))
-        .args([
-            "--remote-debugging-port=0",
-            "--remote-allow-origins=*",
-            "--window-size=1280,900",
-            "--lang=fa",
-            "--blink-settings=imagesEnabled=false",
-            "--disable-notifications",
-            "--mute-audio",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--disable-default-apps",
-            "--disable-sync",
-            "--disable-extensions",
-            "--disable-component-update",
-            "--disable-session-crashed-bubble",
-            "--hide-crash-restore-bubble",
-            "--disable-features=Translate,msEdgeStartupBoost,msImplicitSignin,msEdgeSidebarV2",
-            "--disable-blink-features=AutomationControlled", // navigator.webdriver = false
-            // background tabs must run at full speed for parallel workers
-            "--disable-background-timer-throttling",
-            "--disable-renderer-backgrounding",
-            "--disable-backgrounding-occluded-windows",
-        ]);
+    cmd.arg(format!("--user-data-dir={}", profile.display())).args([
+        "--remote-debugging-port=0",
+        "--remote-allow-origins=*",
+        "--window-size=1280,900",
+        "--lang=fa",
+        "--blink-settings=imagesEnabled=false",
+        "--disable-notifications",
+        "--mute-audio",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-default-apps",
+        "--disable-sync",
+        "--disable-extensions",
+        "--disable-component-update",
+        "--disable-session-crashed-bubble",
+        "--hide-crash-restore-bubble",
+        "--disable-features=Translate,msEdgeStartupBoost,msImplicitSignin,msEdgeSidebarV2",
+        "--disable-blink-features=AutomationControlled", // navigator.webdriver = false
+        // background tabs must run at full speed for parallel workers
+        "--disable-background-timer-throttling",
+        "--disable-renderer-backgrounding",
+        "--disable-backgrounding-occluded-windows",
+    ]);
     if headless {
         cmd.arg("--headless=new");
     }
@@ -521,7 +587,9 @@ async fn launch_in(exe: &str, profile: &Path, headless: bool, tabs: usize) -> Re
         request_timeout: Duration::from_secs(20),
         ..Default::default()
     };
-    let (browser, mut handler) = Browser::connect_with_config(url, config).await.map_err(|e| format!("اتصال به مرورگر ممکن نشد: {e}"))?;
+    let (browser, mut handler) = Browser::connect_with_config(url, config)
+        .await
+        .map_err(|e| format!("اتصال به مرورگر ممکن نشد: {e}"))?;
     let alive = Arc::new(AtomicBool::new(true));
     let flag = alive.clone();
     tokio::spawn(async move {
@@ -542,7 +610,14 @@ async fn launch_in(exe: &str, profile: &Path, headless: bool, tabs: usize) -> Re
     for _ in 0..tabs {
         workers.push(new_tab(&browser, &ua).await?);
     }
-    Ok(Engine { browser, alive, list, workers, proc })
+    Ok(Engine {
+        browser,
+        alive,
+        list,
+        workers,
+        proc,
+        _lease: None,
+    })
 }
 
 async fn new_tab(browser: &Browser, ua: &str) -> Res<Page> {
@@ -629,7 +704,11 @@ pub async fn run(db: &Db, s: &Settings, profile: &Path, req: &ScanRequest, token
 
     let mut i = 0;
     // exact look-ups restart from the first entry on resume (found ones are skipped as known)
-    let mut target = if req.first_limit > 0 && req.lookups.is_empty() { req.first_limit.min(limit) } else { limit };
+    let mut target = if req.first_limit > 0 && req.lookups.is_empty() {
+        req.first_limit.min(limit)
+    } else {
+        limit
+    };
     let mut cur: Option<(i64, i64, i64)> = None; // (run id, checked, found) of the current keyword
     while i < keywords.len() && !token.is_cancelled() {
         let kw = &keywords[i];

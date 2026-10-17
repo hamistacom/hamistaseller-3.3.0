@@ -213,13 +213,19 @@ pub fn city_slug(province: &str, city: &str) -> &'static str {
         .unwrap_or("iran")
 }
 
-/// Site-relative links ("/p/…") made absolute for the platform they came from.
-fn absolute(url: &str, p: &Platform) -> String {
-    if !url.starts_with('/') || url.starts_with("//") {
-        return url.to_string();
+/// Site-relative links made absolute and cleaned; a link that is not this product's own page
+/// (home, search, photo, another site) is dropped instead of being shown as the product's link.
+pub fn verify_links(o: &mut Offer) {
+    use crate::links::{absolute, canonical, check, kind, Kind};
+    o.url = canonical(&absolute(&o.platform, &o.url));
+    if matches!(kind(&o.platform, &o.url), Kind::Home | Kind::Search | Kind::Image) {
+        o.url.clear();
     }
-    let origin: String = p.page.splitn(4, '/').take(3).collect::<Vec<_>>().join("/");
-    format!("{origin}{url}")
+    o.link = check(&o.platform, &o.url).to_string();
+    o.seller_url = canonical(&absolute(&o.platform, &o.seller_url));
+    if !o.seller_url.is_empty() && kind(&o.platform, &o.seller_url) != Kind::Seller {
+        o.seller_url.clear();
+    }
 }
 
 pub fn platform(id: &str) -> Option<&'static Platform> {
@@ -246,17 +252,13 @@ pub struct Offer {
     pub sales: i64,              // sold count, when the platform shows it
     pub updated: String,         // last price/listing update (ISO date-time), when known
     pub location: String,        // seller / ad city, when known
+    /// This seller's / booth's own page on the platform, when the platform's data names it.
+    pub seller_url: String,
+    /// "exact" = `url` is proven to be this product's page on the platform; "unverified"; "" = no link.
+    pub link: String,
 }
 
-const TITLE_KEYS: &[&str] = &[
-    "title_fa",
-    "title",
-    "name1",
-    "name",
-    "product_name",
-    "persian_name",
-    "titleFa",
-];
+const TITLE_KEYS: &[&str] = &["title_fa", "title", "name1", "name", "product_name", "persian_name", "titleFa"];
 const PRICE_KEYS: &[&str] = &[
     "selling_price",
     "final_price",
@@ -283,15 +285,7 @@ const SELLER_KEYS: &[&str] = &[
     "store",
     "bottom_description_text",
 ];
-const RATING_KEYS: &[&str] = &[
-    "rate",
-    "rating",
-    "average",
-    "score",
-    "total_rate",
-    "rating_average",
-    "shop_score",
-];
+const RATING_KEYS: &[&str] = &["rate", "rating", "average", "score", "total_rate", "rating_average", "shop_score"];
 const REVIEW_KEYS: &[&str] = &[
     "count",
     "rating_count",
@@ -301,20 +295,8 @@ const REVIEW_KEYS: &[&str] = &[
     "rates_count",
     "signals",
 ];
-const URL_KEYS: &[&str] = &[
-    "web_client_absolute_url",
-    "url",
-    "link",
-    "uri",
-    "more_info_url",
-    "page_url",
-];
-const BRAND_KEYS: &[&str] = &[
-    "brand",
-    "brand_name",
-    "brand_title",
-    "brandName",
-];
+const URL_KEYS: &[&str] = &["web_client_absolute_url", "url", "link", "uri", "more_info_url", "page_url"];
+const BRAND_KEYS: &[&str] = &["brand", "brand_name", "brand_title", "brandName"];
 const IMAGE_KEYS: &[&str] = &[
     "image_url",
     "image",
@@ -351,23 +333,13 @@ const DATE_KEYS: &[&str] = &[
     "created_at",
     "date",
 ];
-const LOCATION_KEYS: &[&str] = &[
-    "location",
-    "city",
-    "vendor_city",
-    "city_name",
-    "province",
-    "district",
-];
+const LOCATION_KEYS: &[&str] = &["location", "city", "vendor_city", "city_name", "province", "district"];
 
 fn num(v: &Value) -> Option<f64> {
     match v {
         Value::Number(n) => n.as_f64(),
         Value::String(s) => {
-            let d: String = crate::logic::ascii_digits(s)
-                .chars()
-                .filter(|c| c.is_ascii_digit() || *c == '.')
-                .collect();
+            let d: String = crate::logic::ascii_digits(s).chars().filter(|c| c.is_ascii_digit() || *c == '.').collect();
             d.parse().ok()
         }
         _ => None,
@@ -377,9 +349,7 @@ fn num(v: &Value) -> Option<f64> {
 fn text(v: &Value) -> Option<String> {
     match v {
         Value::String(s) if !s.trim().is_empty() => Some(s.trim().to_string()),
-        Value::Object(o) => TITLE_KEYS
-            .iter()
-            .find_map(|k| o.get(*k).and_then(text)),
+        Value::Object(o) => TITLE_KEYS.iter().find_map(|k| o.get(*k).and_then(text)),
         _ => None,
     }
 }
@@ -396,9 +366,7 @@ fn find<'a>(o: &'a serde_json::Map<String, Value>, keys: &[&str], depth: usize) 
     if depth == 0 {
         return None;
     }
-    o.values()
-        .filter_map(Value::as_object)
-        .find_map(|c| find(c, keys, depth - 1))
+    o.values().filter_map(Value::as_object).find_map(|c| find(c, keys, depth - 1))
 }
 
 /// First number under any of `keys` (a key holding an object is searched inside), up to `depth`.
@@ -421,9 +389,7 @@ fn find_num(o: &serde_json::Map<String, Value>, keys: &[&str], depth: usize) -> 
     if depth == 0 {
         return None;
     }
-    o.values()
-        .filter_map(Value::as_object)
-        .find_map(|c| find_num(c, keys, depth - 1))
+    o.values().filter_map(Value::as_object).find_map(|c| find_num(c, keys, depth - 1))
 }
 
 fn price_in(o: &serde_json::Map<String, Value>) -> Option<f64> {
@@ -469,21 +435,10 @@ fn image_of(v: &Value, depth: usize) -> Option<String> {
     match v {
         Value::String(u) => ok(u),
         Value::Array(a) => a.iter().take(4).find_map(|x| image_of(x, depth)),
-        Value::Object(o) if depth > 0 => [
-            "url",
-            "src",
-            "MEDIUM",
-            "SMALL",
-            "medium",
-            "small",
-            "thumbnail",
-            "original",
-            "main",
-            "default",
-        ]
-        .iter()
-        .find_map(|k| o.get(*k).and_then(|x| image_of(x, depth - 1)))
-        .or_else(|| o.values().take(6).find_map(|x| image_of(x, depth - 1))),
+        Value::Object(o) if depth > 0 => ["url", "src", "MEDIUM", "SMALL", "medium", "small", "thumbnail", "original", "main", "default"]
+            .iter()
+            .find_map(|k| o.get(*k).and_then(|x| image_of(x, depth - 1)))
+            .or_else(|| o.values().take(6).find_map(|x| image_of(x, depth - 1))),
         _ => None,
     }
 }
@@ -500,12 +455,7 @@ pub fn iso_utc(secs: i64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + i64::from(m <= 2);
-    format!(
-        "{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}",
-        rem / 3600,
-        rem % 3600 / 60,
-        rem % 60
-    )
+    format!("{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}", rem / 3600, rem % 3600 / 60, rem % 60)
 }
 
 /// A listing date as ISO text: ISO strings are kept, epoch seconds / milliseconds converted.
@@ -560,14 +510,11 @@ fn walk(v: &Value, platform: &str, rial: bool, out: &mut Vec<Offer>, depth: usiz
                     let rating = find_num(o, RATING_KEYS, 2)
                         .map(|r| if r > 5.0 { r / 20.0 } else { r })
                         .filter(|r| *r > 0.0 && *r <= 5.0);
-                    let mut url = find(o, URL_KEYS, 1)
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_string();
-                    if url.is_empty() && platform == "divar" {
-                        if let Some(tok) = o.get("token").and_then(Value::as_str) {
-                            url = format!("https://divar.ir/v/{tok}");
-                        }
+                    // the product's own page (built from the platform's ids), else a link field
+                    // of this object; never a nested photo / vendor link
+                    let (mut url, seller_url) = crate::links::from_json(platform, o);
+                    if url.is_empty() {
+                        url = URL_KEYS.iter().find_map(|k| o.get(*k).and_then(Value::as_str)).unwrap_or("").to_string();
                     }
                     out.push(Offer {
                         platform: platform.into(),
@@ -581,20 +528,13 @@ fn walk(v: &Value, platform: &str, rial: bool, out: &mut Vec<Offer>, depth: usiz
                         shops: o
                             .get("shop_text")
                             .and_then(Value::as_str)
-                            .and_then(|s| {
-                                crate::logic::ascii_digits(s)
-                                    .split_whitespace()
-                                    .find_map(|w| w.parse().ok())
-                            })
+                            .and_then(|s| crate::logic::ascii_digits(s).split_whitespace().find_map(|w| w.parse().ok()))
                             .unwrap_or(0),
-                        image: IMAGE_KEYS
-                            .iter()
-                            .find_map(|k| o.get(*k))
-                            .and_then(|v| image_of(v, 3))
-                            .unwrap_or_default(),
+                        image: IMAGE_KEYS.iter().find_map(|k| o.get(*k)).and_then(|v| image_of(v, 3)).unwrap_or_default(),
                         sales: find_num(o, SALES_KEYS, 1).unwrap_or(0.0) as i64,
                         updated: find(o, DATE_KEYS, 1).and_then(date_of).unwrap_or_default(),
                         location: find(o, LOCATION_KEYS, 1).and_then(text).unwrap_or_default(),
+                        seller_url,
                         ..Default::default()
                     });
                     return; // the product object itself: don't count its nested variants twice
@@ -622,18 +562,9 @@ pub fn size_grams(title: &str) -> Option<f64> {
             None => (*w, words.get(i + 1).copied().unwrap_or("")),
         };
         let Ok(n) = n.parse::<f64>() else { continue };
-        let factor = if unit.starts_with("کیلو")
-            || unit.starts_with("kg")
-            || unit.starts_with("لیتر")
-            || unit.starts_with("ليتر")
-        {
+        let factor = if unit.starts_with("کیلو") || unit.starts_with("kg") || unit.starts_with("لیتر") || unit.starts_with("ليتر") {
             1000.0
-        } else if unit.starts_with("گرم")
-            || unit.starts_with("میلی")
-            || unit.starts_with("سی")
-            || unit.starts_with("g")
-            || unit.starts_with("ml")
-        {
+        } else if unit.starts_with("گرم") || unit.starts_with("میلی") || unit.starts_with("سی") || unit.starts_with("g") || unit.starts_with("ml") {
             1.0
         } else if unit.starts_with("مثقال") {
             4.6875
@@ -673,6 +604,91 @@ pub fn words(s: &str) -> Vec<String> {
         .filter(|w| !w.is_empty())
         .map(String::from)
         .collect()
+}
+
+/// Small Persian number words → value. Only 0–10 (plus «نیم»/«ربع»): bigger words like «چهل» are
+/// part of product names («عسل چهل گیاه») and must be left alone.
+const NUM_WORDS: &[(&str, f64)] = &[
+    ("صفر", 0.0),
+    ("نیم", 0.5),
+    ("ربع", 0.25),
+    ("یک", 1.0),
+    ("یه", 1.0),
+    ("دو", 2.0),
+    ("سه", 3.0),
+    ("چهار", 4.0),
+    ("پنج", 5.0),
+    ("شش", 6.0),
+    ("شیش", 6.0),
+    ("هفت", 7.0),
+    ("هشت", 8.0),
+    ("نه", 9.0),
+    ("ده", 10.0),
+];
+
+/// Grams in one of a unit, for size equivalence («کیلو»/«kg» = 1000, «گرم»/«g» = 1 …). None = not a size unit.
+fn unit_grams(u: &str) -> Option<f64> {
+    if u.starts_with("کیلو") || u.starts_with("kg") || u.starts_with("لیتر") || u.starts_with("ليتر") || u == "l" || u == "lit" {
+        Some(1000.0)
+    } else if u.starts_with("گرم") || u.starts_with("میلی") || u.starts_with("ml") || u.starts_with("سیسی") || u == "g" || u == "gr" || u == "gram" || u == "cc"
+    {
+        Some(1.0)
+    } else if u.starts_with("مثقال") {
+        Some(4.6875)
+    } else {
+        None
+    }
+}
+
+fn fmt_num(n: f64) -> String {
+    if (n.fract()).abs() < 1e-9 {
+        format!("{}", n as i64)
+    } else {
+        format!("{n}")
+    }
+}
+
+/// A size written as one token («۱کیلویی», «500گرمی», «1kg») → grams.
+fn attached_size(w: &str) -> Option<f64> {
+    let p = w.find(|c: char| !(c.is_ascii_digit() || c == '.'))?;
+    if p == 0 {
+        return None;
+    }
+    let n: f64 = w[..p].parse().ok()?;
+    let g = n * unit_grams(&w[p..])?;
+    (n > 0.0 && g <= 200_000.0).then_some(g)
+}
+
+/// Canonical tokens for matching: number words → digits, and «<number> <unit>» (or an attached
+/// «۱کیلویی») folded into one `§<grams>g` token, so «یک کیلویی» = «۱ کیلویی» = «1kg» = «1000 گرم».
+pub fn canon_toks(toks: &[String]) -> Vec<String> {
+    let mapped: Vec<String> = toks
+        .iter()
+        .map(|w| NUM_WORDS.iter().find(|(k, _)| k == w).map_or_else(|| w.clone(), |(_, n)| fmt_num(*n)))
+        .collect();
+    let mut out: Vec<String> = vec![];
+    let mut i = 0;
+    while i < mapped.len() {
+        let w = &mapped[i];
+        if let Some(g) = attached_size(w) {
+            out.push(format!("§{}g", g as i64));
+            i += 1;
+            continue;
+        }
+        if let Ok(n) = w.parse::<f64>() {
+            if let Some(ug) = mapped.get(i + 1).and_then(|u| unit_grams(u)) {
+                let g = n * ug;
+                if g > 0.0 && g <= 200_000.0 {
+                    out.push(format!("§{}g", g as i64));
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+        out.push(w.clone());
+        i += 1;
+    }
+    out
 }
 
 fn edit1(a: &str, b: &str) -> bool {
@@ -717,9 +733,7 @@ pub fn tok_eq(t: &str, q: &str) -> bool {
 }
 
 /// Shop words before the product name that don't change what it is.
-pub(crate) const FILLERS: &[&str] = &[
-    "خرید", "فروش", "قیمت", "پک", "بسته", "ست", "اصل", "اورجینال", "جدید", "ویژه", "عمده", "تک",
-];
+pub(crate) const FILLERS: &[&str] = &["خرید", "فروش", "قیمت", "پک", "بسته", "ست", "اصل", "اورجینال", "جدید", "ویژه", "عمده", "تک"];
 
 /// The offer is about the searched product. Every query word must appear (spelling-tolerant).
 /// `exact` also requires the product to be named near the start of the title, so «میز پینگ پنگ
@@ -728,11 +742,13 @@ pub fn matches(title: &str, q: &[String], exact: bool) -> bool {
     if q.is_empty() {
         return true;
     }
-    let t = words(title);
+    let t = canon_toks(&words(title));
+    let q = canon_toks(q);
+    let q = &q;
     let lead = t.iter().take_while(|w| FILLERS.contains(&w.as_str())).count();
     let mut compact: Option<String> = None;
     let mut first = usize::MAX;
-    
+
     for (i, w) in q.iter().enumerate() {
         let mut at = t.iter().position(|x| tok_eq(x, w));
         if at.is_none() && w.chars().count() >= 4 {
@@ -756,6 +772,97 @@ pub fn relevant(title: &str, query: &str) -> bool {
     matches(title, &words(query), true)
 }
 
+/// One alternative of a multi-product query: words that must all appear, and words that must not.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueryGroup {
+    /// The include phrase as the user wrote it (fed to the platforms' search).
+    pub phrase: String,
+    pub include: Vec<String>,
+    pub exclude: Vec<String>,
+}
+
+/// Parses the keyword box into alternatives (searched and matched independently, results merged):
+///   * «|», «+» or «یا» separate alternatives («عسل یک کیلویی + شهد آزادی»);
+///   * a word after «-», «منهای» or «بجز» is excluded («عسل -موم»);
+///   * everything else in an alternative must all appear (AND, as before).
+pub fn parse_query(raw: &str) -> Vec<QueryGroup> {
+    let mut groups = vec![];
+    let unified = raw.replace(['|', '+', '\n'], "٪"); // one separator char not used in queries
+    for alt in unified.split('٪') {
+        // «یا» as a standalone word is also an OR separator
+        for part in split_or_word(alt) {
+            let mut include_raw = vec![];
+            let mut include = vec![];
+            let mut exclude = vec![];
+            let mut neg_next = false;
+            for tok in part.split_whitespace() {
+                let w = tok.trim();
+                if w.is_empty() {
+                    continue;
+                }
+                if matches!(w, "منهای" | "بجز" | "بدون" | "except" | "not") {
+                    neg_next = true;
+                    continue;
+                }
+                let stripped = w.strip_prefix('-').or_else(|| w.strip_prefix('−')).or_else(|| w.strip_prefix('–'));
+                if neg_next || stripped.is_some() {
+                    exclude.extend(words(stripped.unwrap_or(w)));
+                    neg_next = false;
+                } else {
+                    include_raw.push(w.to_string());
+                    include.extend(words(w));
+                }
+            }
+            include = canon_toks(&include);
+            exclude = canon_toks(&exclude);
+            if !include.is_empty() {
+                groups.push(QueryGroup {
+                    phrase: include_raw.join(" "),
+                    include,
+                    exclude,
+                });
+            }
+        }
+    }
+    if groups.is_empty() {
+        groups.push(QueryGroup {
+            phrase: raw.trim().into(),
+            include: canon_toks(&words(raw)),
+            exclude: vec![],
+        });
+    }
+    groups
+}
+
+/// Splits an alternative on the standalone word «یا» (but keeps «یاقوت», «دریا» … intact).
+fn split_or_word(s: &str) -> Vec<String> {
+    let mut out = vec![String::new()];
+    for tok in s.split_whitespace() {
+        if tok == "یا" {
+            out.push(String::new());
+        } else {
+            let last = out.last_mut().unwrap();
+            if !last.is_empty() {
+                last.push(' ');
+            }
+            last.push_str(tok);
+        }
+    }
+    out
+}
+
+/// The offer matches the multi-product query: it matches at least one alternative's include words
+/// and contains none of that alternative's excluded words.
+pub fn matches_groups(title: &str, groups: &[QueryGroup], exact: bool) -> bool {
+    if groups.is_empty() {
+        return true;
+    }
+    let t = canon_toks(&words(title));
+    groups
+        .iter()
+        .any(|g| matches(title, &g.include, exact) && !g.exclude.iter().any(|w| t.iter().any(|x| tok_eq(x, w))))
+}
+
 /// Persian alphabetical order (Unicode order puts پ چ ژ گ after ی).
 pub fn collate(s: &str) -> Vec<u32> {
     const ALPHA: &str = "آاأبپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی";
@@ -768,15 +875,151 @@ pub fn collate(s: &str) -> Vec<u32> {
 
 /// Words after a product name that are descriptions, varieties, adjectives or quantities — NEVER brands.
 pub(crate) const NOT_BRANDS: &[&str] = &[
-    "طبیعی", "اصل", "اصلی", "ارگانیک", "خالص", "ممتاز", "درجه", "یک", "دو", "سه", "چهار", "پنج", "چند", "چهل", "هزار", "گیاه", "گل",
-    "استاندارد", "کوهستان", "کوهی", "وحشی", "گون", "کنار", "آویشن", "بهار", "نارنج", "بهارنارنج", "گشنیز", "سیاهدانه", "جعفری", "مرکبات",
-    "یونجه", "اسطوخودوس", "خارشتر", "زول", "موم", "مومدار", "ساکارز", "رژیمی", "دیابتی", "تغذیه", "زنبور", "دارویی", "درمانی", "مقوی",
-    "تازه", "امسالی", "اعلا", "سوپر", "نگین", "سرگل", "پوشال", "دسته", "ممتاز", "صادراتی", "محلی", "سنتی", "خانگی", "روستایی", "ییلاقی",
-    "مدل", "رنگ", "سایز", "بسته", "عددی", "عدد", "گرمی", "گرم", "کیلویی", "کیلو", "کیلوگرم", "لیتری", "لیتر", "سی", "میلی", "مثقال", "مثقالی",
-    "بزرگ", "کوچک", "متوسط", "جدید", "ویژه", "ایرانی", "خارجی", "وارداتی", "با", "و", "در", "از", "به", "برای", "همراه", "بدون", "دار",
-    "مخصوص", "حرفه", "ای", "سری", "پک", "ست", "عمده", "تک", "فله", "کد", "طرح", "نوع", "برند", "شرکت", "فروشگاه", "غرفه", "تولیدی", "بازرگانی",
-    "پخش", "ارسال", "رایگان", "فوری", "تضمینی", "ضمانت", "آزمایش", "برگه", "دارای", "ظرف", "شیشه", "پلاستیکی", "فلزی", "کادویی", "تخفیف",
-    "فروش", "خرید", "قیمت", "ارزان", "کیفیت", "عالی", "فوق", "العاده", "خوشمزه", "معطر", "خام", "رسیده", "صاف", "شده", "عصاره", "ژل", "رویال", "گرده",
+    "طبیعی",
+    "اصل",
+    "اصلی",
+    "ارگانیک",
+    "خالص",
+    "ممتاز",
+    "درجه",
+    "یک",
+    "دو",
+    "سه",
+    "چهار",
+    "پنج",
+    "چند",
+    "چهل",
+    "هزار",
+    "گیاه",
+    "گل",
+    "استاندارد",
+    "کوهستان",
+    "کوهی",
+    "وحشی",
+    "گون",
+    "کنار",
+    "آویشن",
+    "بهار",
+    "نارنج",
+    "بهارنارنج",
+    "گشنیز",
+    "سیاهدانه",
+    "جعفری",
+    "مرکبات",
+    "یونجه",
+    "اسطوخودوس",
+    "خارشتر",
+    "زول",
+    "موم",
+    "مومدار",
+    "ساکارز",
+    "رژیمی",
+    "دیابتی",
+    "تغذیه",
+    "زنبور",
+    "دارویی",
+    "درمانی",
+    "مقوی",
+    "تازه",
+    "امسالی",
+    "اعلا",
+    "سوپر",
+    "نگین",
+    "سرگل",
+    "پوشال",
+    "دسته",
+    "ممتاز",
+    "صادراتی",
+    "محلی",
+    "سنتی",
+    "خانگی",
+    "روستایی",
+    "ییلاقی",
+    "مدل",
+    "رنگ",
+    "سایز",
+    "بسته",
+    "عددی",
+    "عدد",
+    "گرمی",
+    "گرم",
+    "کیلویی",
+    "کیلو",
+    "کیلوگرم",
+    "لیتری",
+    "لیتر",
+    "سی",
+    "میلی",
+    "مثقال",
+    "مثقالی",
+    "بزرگ",
+    "کوچک",
+    "متوسط",
+    "جدید",
+    "ویژه",
+    "ایرانی",
+    "خارجی",
+    "وارداتی",
+    "با",
+    "و",
+    "در",
+    "از",
+    "به",
+    "برای",
+    "همراه",
+    "بدون",
+    "دار",
+    "مخصوص",
+    "حرفه",
+    "ای",
+    "سری",
+    "پک",
+    "ست",
+    "عمده",
+    "تک",
+    "فله",
+    "کد",
+    "طرح",
+    "نوع",
+    "برند",
+    "شرکت",
+    "فروشگاه",
+    "غرفه",
+    "تولیدی",
+    "بازرگانی",
+    "پخش",
+    "ارسال",
+    "رایگان",
+    "فوری",
+    "تضمینی",
+    "ضمانت",
+    "آزمایش",
+    "برگه",
+    "دارای",
+    "ظرف",
+    "شیشه",
+    "پلاستیکی",
+    "فلزی",
+    "کادویی",
+    "تخفیف",
+    "فروش",
+    "خرید",
+    "قیمت",
+    "ارزان",
+    "کیفیت",
+    "عالی",
+    "فوق",
+    "العاده",
+    "خوشمزه",
+    "معطر",
+    "خام",
+    "رسیده",
+    "صاف",
+    "شده",
+    "عصاره",
+    "ژل",
+    "رویال",
+    "گرده",
 ];
 
 /// Cleans a shop / booth / company name so it can be used as a verified merchant/brand entity.
@@ -798,12 +1041,7 @@ pub fn clean_merchant_name(raw: &str) -> String {
             s = rest.trim().to_string();
         }
     }
-    if s.chars().count() < 2
-        || s.chars().count() > 35
-        || s.contains("تومان")
-        || s.contains("ریال")
-        || s.contains("فروشنده")
-    {
+    if s.chars().count() < 2 || s.chars().count() > 35 || s.contains("تومان") || s.contains("ریال") || s.contains("فروشنده") {
         return String::new();
     }
     let w = words(&s);
@@ -823,10 +1061,7 @@ pub fn mine_brands(offers: &[Offer], query: &str) -> Vec<String> {
         for (i, w) in t.iter().enumerate() {
             if matches!(w.as_str(), "برند" | "مارک") {
                 if let Some(next) = t.get(i + 1) {
-                    if next.chars().count() >= 2
-                        && !next.chars().any(|c| c.is_ascii_digit())
-                        && !NOT_BRANDS.contains(&next.as_str())
-                    {
+                    if next.chars().count() >= 2 && !next.chars().any(|c| c.is_ascii_digit()) && !NOT_BRANDS.contains(&next.as_str()) {
                         *seen.entry(next.clone()).or_default() += 2;
                     }
                 }
@@ -862,20 +1097,7 @@ pub struct BrandEntry {
 pub fn brand_key(b: &str) -> String {
     words(b)
         .into_iter()
-        .filter(|w| {
-            ![
-                "برند",
-                "شرکت",
-                "فروشگاه",
-                "غرفه",
-                "محصولات",
-                "گروه",
-                "صنایع",
-                "تولیدی",
-                "بازرگانی",
-            ]
-            .contains(&w.as_str())
-        })
+        .filter(|w| !["برند", "شرکت", "فروشگاه", "غرفه", "محصولات", "گروه", "صنایع", "تولیدی", "بازرگانی"].contains(&w.as_str()))
         .collect::<Vec<_>>()
         .concat()
 }
@@ -926,52 +1148,16 @@ pub const TAXONOMY: &[Category] = &[
             "زعفران قائنات",
             "زعفران تربت حیدریه",
         ],
-        brands: &[
-            "سحرخیز",
-            "نوین",
-            "قائنات",
-            "اکبر",
-            "گلستان",
-            "یک و یک",
-            "تارونه",
-            "ویستا",
-            "بهرامن",
-            "مصطفوی",
-        ],
+        brands: &["سحرخیز", "نوین", "قائنات", "اکبر", "گلستان", "یک و یک", "تارونه", "ویستا", "بهرامن", "مصطفوی"],
     },
     Category {
         keys: &["موبایل", "گوشی"],
-        subs: &[
-            "گوشی سامسونگ",
-            "گوشی شیائومی",
-            "گوشی آیفون",
-            "گوشی نوکیا",
-            "گوشی ساده",
-            "گوشی ۵G",
-        ],
-        brands: &[
-            "سامسونگ",
-            "شیائومی",
-            "اپل",
-            "آنر",
-            "نوکیا",
-            "هواوی",
-            "ریلمی",
-            "موتورولا",
-            "وان‌پلاس",
-            "پوکو",
-        ],
+        subs: &["گوشی سامسونگ", "گوشی شیائومی", "گوشی آیفون", "گوشی نوکیا", "گوشی ساده", "گوشی ۵G"],
+        brands: &["سامسونگ", "شیائومی", "اپل", "آنر", "نوکیا", "هواوی", "ریلمی", "موتورولا", "وان‌پلاس", "پوکو"],
     },
     Category {
         keys: &["پوشاک", "لباس", "تیشرت", "شلوار", "مانتو"],
-        subs: &[
-            "تیشرت مردانه",
-            "شلوار جین",
-            "مانتو زنانه",
-            "لباس ورزشی",
-            "لباس بچگانه",
-            "هودی",
-        ],
+        subs: &["تیشرت مردانه", "شلوار جین", "مانتو زنانه", "لباس ورزشی", "لباس بچگانه", "هودی"],
         brands: &[
             "ال‌سی‌من",
             "کوتون",
@@ -987,48 +1173,17 @@ pub const TAXONOMY: &[Category] = &[
     },
     Category {
         keys: &["مبل", "مبلمان"],
-        subs: &[
-            "مبل راحتی",
-            "مبل کلاسیک",
-            "مبل ال",
-            "کاناپه",
-            "مبل تختخواب‌شو",
-            "صندلی راحتی",
-        ],
+        subs: &["مبل راحتی", "مبل کلاسیک", "مبل ال", "کاناپه", "مبل تختخواب‌شو", "صندلی راحتی"],
         brands: &["هانسون", "نظری", "ساج", "آرین", "داوین", "نیلپر", "لیو", "رست"],
     },
     Category {
         keys: &["خشکبار", "آجیل", "پسته", "بادام", "گردو"],
-        subs: &[
-            "پسته اکبری",
-            "پسته احمدآقایی",
-            "بادام درختی",
-            "گردو",
-            "آجیل چهارمغز",
-            "کشمش",
-            "خرما",
-        ],
-        brands: &[
-            "گلستان",
-            "سرزمین",
-            "تواضع",
-            "برتر",
-            "آجیل حسینی",
-            "تابان",
-            "مزمز",
-            "دایتی",
-        ],
+        subs: &["پسته اکبری", "پسته احمدآقایی", "بادام درختی", "گردو", "آجیل چهارمغز", "کشمش", "خرما"],
+        brands: &["گلستان", "سرزمین", "تواضع", "برتر", "آجیل حسینی", "تابان", "مزمز", "دایتی"],
     },
     Category {
         keys: &["لوازم خانگی", "یخچال", "ماشین لباسشویی", "اجاق", "جاروبرقی"],
-        subs: &[
-            "یخچال فریزر",
-            "ماشین لباسشویی",
-            "ماشین ظرفشویی",
-            "جاروبرقی",
-            "اجاق گاز",
-            "مایکروویو",
-        ],
+        subs: &["یخچال فریزر", "ماشین لباسشویی", "ماشین ظرفشویی", "جاروبرقی", "اجاق گاز", "مایکروویو"],
         brands: &[
             "اسنوا",
             "ال‌جی",
@@ -1045,14 +1200,7 @@ pub const TAXONOMY: &[Category] = &[
     },
     Category {
         keys: &["قطعات خودرو", "لنت", "روغن موتور", "باتری خودرو", "لاستیک"],
-        subs: &[
-            "لنت ترمز",
-            "روغن موتور",
-            "فیلتر روغن",
-            "باتری خودرو",
-            "لاستیک خودرو",
-            "شمع",
-        ],
+        subs: &["لنت ترمز", "روغن موتور", "فیلتر روغن", "باتری خودرو", "لاستیک خودرو", "شمع"],
         brands: &[
             "ایساکو",
             "بهران",
@@ -1068,106 +1216,42 @@ pub const TAXONOMY: &[Category] = &[
     },
     Category {
         keys: &["قهوه", "تجهیزات کافه", "اسپرسو"],
-        subs: &[
-            "دانه قهوه",
-            "قهوه اسپرسو",
-            "دستگاه اسپرسو",
-            "آسیاب قهوه",
-            "قهوه ترک",
-            "شیر جوش",
-        ],
-        brands: &[
-            "لاوازا",
-            "ایلی",
-            "مولتی‌کافه",
-            "جیمی",
-            "گاستروبک",
-            "دلونگی",
-            "تکنو",
-            "بن‌مانو",
-            "ریو",
-            "مباشی",
-        ],
+        subs: &["دانه قهوه", "قهوه اسپرسو", "دستگاه اسپرسو", "آسیاب قهوه", "قهوه ترک", "شیر جوش"],
+        brands: &["لاوازا", "ایلی", "مولتی‌کافه", "جیمی", "گاستروبک", "دلونگی", "تکنو", "بن‌مانو", "ریو", "مباشی"],
     },
     Category {
         keys: &["چای"],
-        subs: &[
-            "چای سیاه",
-            "چای سبز",
-            "چای ایرانی",
-            "چای کیسه‌ای",
-            "دمنوش",
-        ],
-        brands: &[
-            "گلستان",
-            "احمد",
-            "دبش",
-            "شهرزاد",
-            "محمود",
-            "سحرخیز",
-            "دوغزال",
-            "لاهیجان",
-            "نیوشا",
-        ],
+        subs: &["چای سیاه", "چای سبز", "چای ایرانی", "چای کیسه‌ای", "دمنوش"],
+        brands: &["گلستان", "احمد", "دبش", "شهرزاد", "محمود", "سحرخیز", "دوغزال", "لاهیجان", "نیوشا"],
     },
     Category {
         keys: &["برنج"],
-        subs: &[
-            "برنج طارم",
-            "برنج هاشمی",
-            "برنج دم‌سیاه",
-            "برنج پاکستانی",
-            "برنج هندی",
-        ],
+        subs: &["برنج طارم", "برنج هاشمی", "برنج دم‌سیاه", "برنج پاکستانی", "برنج هندی"],
         brands: &["مهتاب", "خاطره", "گلستان", "طبیعت", "فجر", "محسن", "مژده", "آوازه"],
     },
     Category {
         keys: &["روغن", "روغن خوراکی"],
-        subs: &[
-            "روغن مایع",
-            "روغن سرخ‌کردنی",
-            "روغن زیتون",
-            "روغن کنجد",
-            "روغن جامد",
-        ],
-        brands: &[
-            "لادن",
-            "بهار",
-            "اویلا",
-            "فامیلا",
-            "طبیعت",
-            "غنچه",
-            "ورامین",
-            "اتکا",
-        ],
+        subs: &["روغن مایع", "روغن سرخ‌کردنی", "روغن زیتون", "روغن کنجد", "روغن جامد"],
+        brands: &["لادن", "بهار", "اویلا", "فامیلا", "طبیعت", "غنچه", "ورامین", "اتکا"],
     },
 ];
 
 pub fn category_for(query: &str) -> Option<&'static Category> {
     let q = words(query).join(" ");
-    TAXONOMY
-        .iter()
-        .find(|c| c.keys.iter().any(|k| q.contains(&words(k).join(" "))))
+    TAXONOMY.iter().find(|c| c.keys.iter().any(|k| q.contains(&words(k).join(" "))))
 }
 
 /// The brand of an offer: the platform's field, else a known brand named in the title,
 /// else a verified shop / booth name (`seller`).
 pub fn brand_of(o: &Offer, known: &[String]) -> String {
     let b = o.brand.trim();
-    if !b.is_empty()
-        && b != "متفرقه"
-        && !b.eq_ignore_ascii_case("other")
-        && !NOT_BRANDS.contains(&norm(b).as_str())
-    {
+    if !b.is_empty() && b != "متفرقه" && !b.eq_ignore_ascii_case("other") && !NOT_BRANDS.contains(&norm(b).as_str()) {
         return b.to_string();
     }
     let t = words(&o.title);
     if let Some(found) = known.iter().find(|k| {
         let bw = words(k);
-        !bw.is_empty()
-            && bw
-                .iter()
-                .all(|w| t.iter().any(|x| x == w || (w.chars().count() >= 4 && tok_eq(x, w))))
+        !bw.is_empty() && bw.iter().all(|w| t.iter().any(|x| x == w || (w.chars().count() >= 4 && tok_eq(x, w))))
     }) {
         return found.clone();
     }
@@ -1266,6 +1350,10 @@ pub struct Report {
     pub groups: Vec<crate::identity::Group>,
     /// Earlier searches per source: (date, platform name, median).
     pub source_history: Vec<(String, String, i64)>,
+    /// Top web results (at most 3), each read as a structured product page.
+    pub web: Vec<crate::web::WebResult>,
+    /// B2B suppliers found for this product (wholesale / B2B mode).
+    pub suppliers: Vec<crate::web::Supplier>,
 }
 
 pub(crate) fn pct(sorted: &[i64], p: f64) -> i64 {
@@ -1296,29 +1384,18 @@ pub fn analyze(query: &str, brand_filter: &str, offers: Vec<Offer>, target_margi
     analyze_opts(query, brand_filter, offers, target_margin, true)
 }
 
-pub fn analyze_opts(
-    query: &str,
-    brand_filter: &str,
-    mut offers: Vec<Offer>,
-    target_margin: f64,
-    exact: bool,
-) -> Report {
+pub fn analyze_opts(query: &str, brand_filter: &str, mut offers: Vec<Offer>, target_margin: f64, exact: bool) -> Report {
     let cat = category_for(query);
     let qw = words(query);
+    let groups = parse_query(query);
     let before = offers.len();
-    offers.retain(|o| matches(&o.title, &qw, exact));
+    offers.retain(|o| matches_groups(&o.title, &groups, exact));
     let dropped = before - offers.len();
     // brands: the taxonomy's, every brand a platform named, and brands mined from titles
-    let mut known: Vec<String> = cat
-        .map(|c| c.brands.iter().map(|b| b.to_string()).collect())
-        .unwrap_or_default();
+    let mut known: Vec<String> = cat.map(|c| c.brands.iter().map(|b| b.to_string()).collect()).unwrap_or_default();
     for o in &offers {
         let b = o.brand.trim();
-        if !b.is_empty()
-            && b != "متفرقه"
-            && !NOT_BRANDS.contains(&norm(b).as_str())
-            && !known.iter().any(|k| brand_key(k) == brand_key(b))
-        {
+        if !b.is_empty() && b != "متفرقه" && !NOT_BRANDS.contains(&norm(b).as_str()) && !known.iter().any(|k| brand_key(k) == brand_key(b)) {
             known.push(b.to_string());
         }
     }
@@ -1337,8 +1414,7 @@ pub fn analyze_opts(
         let bk = brand_key(brand_filter);
         let bw = words(brand_filter);
         offers.retain(|o| {
-            let ok_brand =
-                !o.brand.is_empty() && (brand_key(&o.brand) == bk || brand_key(&o.brand).contains(&bk));
+            let ok_brand = !o.brand.is_empty() && (brand_key(&o.brand) == bk || brand_key(&o.brand).contains(&bk));
             let ok_seller = !o.seller.is_empty() && brand_key(&o.seller).contains(&bk);
             let t = words(&o.title);
             ok_brand || ok_seller || bw.iter().all(|w| t.iter().any(|x| tok_eq(x, w)))
@@ -1355,18 +1431,10 @@ pub fn analyze_opts(
     let (p25, p75) = (pct(&prices, 0.25), pct(&prices, 0.75));
     let iqr = (p75 - p25) as f64;
     let (lo, hi) = (p25 as f64 - 1.5 * iqr, p75 as f64 + 1.5 * iqr);
-    let inliers: Vec<&&Offer> = pool
-        .iter()
-        .filter(|o| (basis(o) as f64) >= lo && (basis(o) as f64) <= hi)
-        .collect();
+    let inliers: Vec<&&Offer> = pool.iter().filter(|o| (basis(o) as f64) >= lo && (basis(o) as f64) <= hi).collect();
     let wsum: f64 = inliers.iter().map(|o| 0.5 + trust(o)).sum();
     let weighted = if wsum > 0.0 {
-        (inliers
-            .iter()
-            .map(|o| basis(o) as f64 * (0.5 + trust(o)))
-            .sum::<f64>()
-            / wsum)
-            .round() as i64
+        (inliers.iter().map(|o| basis(o) as f64 * (0.5 + trust(o))).sum::<f64>() / wsum).round() as i64
     } else {
         0
     };
@@ -1386,11 +1454,7 @@ pub fn analyze_opts(
     let span = (stats.max - stats.min).max(1) as f64;
     for o in offers.iter_mut() {
         let b = if per_kg { o.unit_price.unwrap_or(0) } else { o.price };
-        let adv = if b == 0 {
-            0.0
-        } else {
-            ((stats.max - b) as f64 / span).clamp(0.0, 1.0)
-        };
+        let adv = if b == 0 { 0.0 } else { ((stats.max - b) as f64 / span).clamp(0.0, 1.0) };
         let outlier = (b as f64) < lo || (b as f64) > hi;
         let rating = o.rating.unwrap_or(3.5) / 5.0;
         let volume = ((o.reviews as f64 + 1.0).log10() / 3.0).min(1.0);
@@ -1426,9 +1490,7 @@ pub fn analyze_opts(
             o.brand.clone()
         }
     });
-    let channels = share(&|o| {
-        platform(&o.platform).map_or(o.platform.clone(), |p| p.name.to_string())
-    });
+    let channels = share(&|o| platform(&o.platform).map_or(o.platform.clone(), |p| p.name.to_string()));
     let tier_names = ["اقتصادی", "رقابتی", "میان‌رده", "پریمیوم"];
     let q50 = stats.median;
     let mut tiers: Vec<Share> = tier_names
@@ -1457,9 +1519,7 @@ pub fn analyze_opts(
     }
 
     // recommended selling price: cost × (1 + margin), kept inside the market's p25–p75 band
-    let best = offers
-        .iter()
-        .find(|o| basis(o) > 0 && !((basis(o) as f64) < lo || (basis(o) as f64) > hi));
+    let best = offers.iter().find(|o| basis(o) > 0 && !((basis(o) as f64) < lo || (basis(o) as f64) > hi));
     let cost = best.map_or(stats.p25, |o| o.price);
     let cost_basis = best.map_or(stats.p25, basis);
     let want = cost_basis as f64 * (1.0 + target_margin / 100.0);
@@ -1483,10 +1543,7 @@ pub fn analyze_opts(
         ));
     }
     if per_kg {
-        notes.push(
-            "قیمت‌ها بر اساس هر کیلوگرم (یا لیتر) مقایسه شده‌اند، چون بسته‌ها اندازه‌های مختلف دارند."
-                .into(),
-        );
+        notes.push("قیمت‌ها بر اساس هر کیلوگرم (یا لیتر) مقایسه شده‌اند، چون بسته‌ها اندازه‌های مختلف دارند.".into());
     }
     let sell_on = channels
         .iter()
@@ -1505,15 +1562,12 @@ pub fn analyze_opts(
     let advice = Advice {
         buy_from: best
             .map(|o| {
-                [
-                    o.seller.as_str(),
-                    platform(&o.platform).map_or(o.platform.as_str(), |p| p.name),
-                ]
-                .iter()
-                .filter(|s| !s.is_empty())
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(" · ")
+                [o.seller.as_str(), platform(&o.platform).map_or(o.platform.as_str(), |p| p.name)]
+                    .iter()
+                    .filter(|s| !s.is_empty())
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(" · ")
             })
             .unwrap_or_default(),
         buy_price: cost,
@@ -1541,19 +1595,14 @@ pub fn analyze_opts(
     let mut phrases: HashMap<String, usize> = HashMap::new();
     for o in &offers {
         let t = words(&o.title);
-        let last = qw
-            .iter()
-            .filter_map(|w| t.iter().position(|x| tok_eq(x, w)))
-            .max();
+        let last = qw.iter().filter_map(|w| t.iter().position(|x| tok_eq(x, w))).max();
         if let Some(next) = last.and_then(|i| t.get(i + 1)) {
             let useful = next.chars().count() > 2
                 && !next.chars().any(|c| c.is_ascii_digit())
                 && !FILLERS.contains(&next.as_str())
                 && !brand_keys.contains(&brand_key(next));
             if useful {
-                *phrases
-                    .entry(format!("{} {next}", qw.join(" ")))
-                    .or_default() += 1;
+                *phrases.entry(format!("{} {next}", qw.join(" "))).or_default() += 1;
             }
         }
     }
@@ -1564,11 +1613,7 @@ pub fn analyze_opts(
             subcategories.push(p);
         }
     }
-    let mut brand_chips: Vec<String> = brands
-        .iter()
-        .filter(|b| b.name != "سایر / بدون برند")
-        .map(|b| b.name.clone())
-        .collect();
+    let mut brand_chips: Vec<String> = brands.iter().filter(|b| b.name != "سایر / بدون برند").map(|b| b.name.clone()).collect();
     for b in cat.map(|c| c.brands).unwrap_or(&[]) {
         if !brand_chips.iter().any(|x| x == b) {
             brand_chips.push(b.to_string());
@@ -1576,10 +1621,7 @@ pub fn analyze_opts(
     }
     // the brand menu: one row per brand / company / verified shop, with its channels and price level
     let mut groups: BTreeMap<String, Vec<&Offer>> = BTreeMap::new();
-    for o in offers
-        .iter()
-        .filter(|o| !o.brand.is_empty() && !NOT_BRANDS.contains(&norm(&o.brand).as_str()))
-    {
+    for o in offers.iter().filter(|o| !o.brand.is_empty() && !NOT_BRANDS.contains(&norm(&o.brand).as_str())) {
         let k = brand_key(&o.brand);
         if !k.is_empty() {
             groups.entry(k).or_default().push(o);
@@ -1589,8 +1631,7 @@ pub fn analyze_opts(
         .into_values()
         .map(|g| {
             let mut names: HashMap<&str, usize> = HashMap::new();
-            g.iter()
-                .for_each(|o| *names.entry(o.brand.as_str()).or_default() += 1);
+            g.iter().for_each(|o| *names.entry(o.brand.as_str()).or_default() += 1);
             let name = names
                 .into_iter()
                 .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(a.0)))
@@ -1618,11 +1659,7 @@ pub fn analyze_opts(
             });
         }
     }
-    brand_list.sort_by(|a, b| {
-        b.count
-            .cmp(&a.count)
-            .then_with(|| collate(&a.name).cmp(&collate(&b.name)))
-    });
+    brand_list.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| collate(&a.name).cmp(&collate(&b.name))));
     let groups = crate::identity::group(&offers);
 
     Report {
@@ -1716,14 +1753,14 @@ for (const el of document.querySelectorAll('a[href]')) {
 out.push({ cards });
 const body = document.body ? document.body.innerText.slice(0, 3000) : '';
 return {
-  blocked: /captcha|challenge|verify you are human|ربات نیستم|تأیید هویت/i.test(body),
+  blocked: /captcha|challenge|verify you are human|ربات نیستم|ربات هستید|فلش پازل|تأیید هویت|arcaptcha/i.test(body),
   login: /\/(login|signin|sign-in|auth|session)(\/|$|\?)/i.test(location.pathname + location.search),
   cards: cards.length,
   data: out,
 };
 "#;
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Debug, PartialEq)]
 #[serde(default)]
 struct PageData {
     blocked: bool,
@@ -1766,56 +1803,59 @@ async fn scroll_for(page: &chromiumoxide::Page, want: usize, token: &Cancellatio
     d
 }
 
-const VERIFY_WAIT: &str = "یک پنجره مرورگر باز شد: «{p}» تأیید «ربات نیستم» یا ورود به حساب خواست. آن را انجام دهید یا دکمه «رد کردن و ادامه» را بزنید.";
+const VERIFY_WAIT: &str = "یک پنجره مرورگر باز شد: «{p}» تأیید «ربات نیستم» یا ورود به حساب خواست. آن را در همان پنجره انجام دهید؛ جستجو خودکار ادامه پیدا می‌کند. برای رد کردن این منبع، پنجره را ببندید یا «رد کردن و ادامه» را بزنید.";
 
-/// The page needs the user (captcha or sign-in): a visible window on the same profile.
-/// Never gets stuck on 0-result queries: closing the browser window or clicking «رد کردن و ادامه»
-/// immediately continues to the next platform without error.
-async fn attended(
-    s: &Settings,
-    profile: &Path,
-    p: &Platform,
-    url: &str,
-    want: usize,
-    token: &CancellationToken,
-    emit: Emit<'_>,
-) -> Result<PageData, String> {
+/// How a source that needed the user ended (shown per source in the report).
+#[derive(Debug, PartialEq)]
+enum Attended {
+    /// The check was passed and the results page was read.
+    Read(PageData),
+    /// The user skipped the source (closed the window / «رد کردن و ادامه») or Stop was pressed.
+    Skipped,
+    /// Nobody passed the check in time.
+    TimedOut,
+}
+
+/// The page needs the user (captcha or sign-in): a visible window on the same profile. The caller
+/// must have closed its own headless browser first (one profile = one browser).
+/// Never gets stuck: closing the window, «رد کردن و ادامه», Stop or the time limit (also while a
+/// sign-in page is shown) all end the wait and the search goes on with the next platform.
+async fn attended(s: &Settings, profile: &Path, p: &Platform, url: &str, want: usize, token: &CancellationToken, emit: Emit<'_>) -> Result<Attended, String> {
+    scanner::clear_wait_skip();
     emit(ScanEvent::Captcha {
         message: VERIFY_WAIT.replace("{p}", p.name),
     });
     let mut eng = scanner::launch(s, profile, false, 0).await?;
     scanner::goto(&eng.list, url).await;
-    let deadline = std::time::Instant::now() + Duration::from_secs(180);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5 * 60);
     let mut reloaded_once = false;
     let result = loop {
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_millis(1500)) => {}
-            _ = token.cancelled() => break Ok(PageData::default()),
+            _ = token.cancelled() => break Attended::Skipped,
         }
-        // User closed the browser window manually -> treat as "skip this platform and continue", never fail
-        if eng.proc.exited() || !eng.alive.load(std::sync::atomic::Ordering::Relaxed) {
-            break Ok(PageData::default());
-        }
-        let d: PageData = scanner::js(&eng.list, PAGE_JS).await.unwrap_or_default();
-        if d.login {
-            continue;
-        }
-        if !d.blocked {
-            if d.cards == 0 && !reloaded_once {
-                reloaded_once = true;
-                scanner::goto(&eng.list, url).await;
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                continue;
-            }
-            break Ok(scroll_for(&eng.list, want, token).await);
+        if scanner::take_wait_skip() || eng.proc.exited() || !eng.alive.load(std::sync::atomic::Ordering::Relaxed) {
+            break Attended::Skipped;
         }
         if std::time::Instant::now() > deadline {
-            break Ok(PageData::default());
+            break Attended::TimedOut;
         }
+        let d: PageData = scanner::js(&eng.list, PAGE_JS).await.unwrap_or_default();
+        if d.blocked || d.login {
+            continue;
+        }
+        if d.cards == 0 && !reloaded_once {
+            // the check was passed on another page (e.g. the home page): open the search again
+            reloaded_once = true;
+            scanner::goto(&eng.list, url).await;
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            continue;
+        }
+        break Attended::Read(scroll_for(&eng.list, want, token).await);
     };
     scanner::shut(Some(eng)).await;
     scanner::status(emit, format!("ادامه جستجو پس از {}…", p.name));
-    result
+    Ok(result)
 }
 
 #[allow(clippy::too_many_arguments)] // one call site; a context struct would only rename these
@@ -1831,15 +1871,10 @@ async fn collect_one(
     emit: Emit<'_>,
 ) -> Result<Vec<Offer>, String> {
     let want = req.limit.clamp(10, 600) as usize;
-    let sort = p
-        .sorts
-        .iter()
-        .find(|(k, _)| *k == req.sort)
-        .or(p.sorts.first())
-        .map_or("", |x| x.1);
+    let sort = p.sorts.iter().find(|(k, _)| *k == req.sort).or(p.sorts.first()).map_or("", |x| x.1);
     let city = city_slug(&req.province, &req.city);
     let qw = words(req.query.as_str()); // extracted words out of loop
-    
+
     // 1) the public JSON search API, page after page until enough offers about this product
     let api = crate::logic::test_seam("HAMISTA_MARKET_BASE")
         .map(|base| format!("{base}/{}?q={{q}}&page={{page}}", p.id))
@@ -1864,12 +1899,7 @@ async fn collect_one(
                     city,
                 },
             );
-            let Ok(Ok(r)) = tokio::time::timeout(
-                Duration::from_secs(25),
-                http().get(&url).header("Accept", "application/json").send(),
-            )
-            .await
-            else {
+            let Ok(Ok(r)) = tokio::time::timeout(Duration::from_secs(25), http().get(&url).header("Accept", "application/json").send()).await else {
                 break;
             };
             if !r.status().is_success() {
@@ -1878,10 +1908,7 @@ async fn collect_one(
             let Ok(v) = r.json::<Value>().await else { break };
             // If the JSON API returned a valid search payload (even with 0 products for a niche brand),
             // mark `api_answered = true` so we don't open a browser and trigger a false captcha!
-            if v.get("results").is_some()
-                || v.get("data").is_some()
-                || v.get("products").is_some()
-            {
+            if v.get("results").is_some() || v.get("data").is_some() || v.get("products").is_some() {
                 api_answered = true;
             }
             let fresh: Vec<Offer> = offers_in(&v, p.id, p.rial)
@@ -1892,19 +1919,11 @@ async fn collect_one(
                 break;
             }
             got.extend(fresh);
-            if got
-                .iter()
-                .filter(|o| matches(&o.title, &qw, req.exact))
-                .count()
-                >= want
-            {
+            if got.iter().filter(|o| matches(&o.title, &qw, req.exact)).count() >= want {
                 break;
             }
             if page + 1 < pages {
-                scanner::status(
-                    emit,
-                    format!("{}: صفحه {} — {} پیشنهاد", p.name, page + 2, got.len()),
-                );
+                scanner::status(emit, format!("{}: صفحه {} — {} پیشنهاد", p.name, page + 2, got.len()));
                 tokio::time::sleep(Duration::from_millis(350)).await; // polite pacing
             }
         }
@@ -1936,11 +1955,24 @@ async fn collect_one(
     );
     scanner::goto(&e.list, &url).await;
     tokio::time::sleep(Duration::from_millis(2500)).await;
-    let mut d = scroll_for(&e.list, want, token).await;
-    if d.blocked || d.login {
-        d = attended(s, profile, p, &url, want, token, emit).await?;
+    let d = scroll_for(&e.list, want, token).await;
+    if !(d.blocked || d.login) {
+        return Ok(page_offers(&d, p));
     }
-    Ok(page_offers(&d, p))
+    // the visible window needs the profile this headless browser holds: close it first (the next
+    // platform starts a fresh one)
+    scanner::shut(eng.take()).await;
+    let why = if d.login {
+        "ورود به حساب لازم است"
+    } else {
+        "تأیید «ربات نیستم» لازم است"
+    };
+    match attended(s, profile, p, &url, want, token, emit).await? {
+        Attended::Read(d) => Ok(page_offers(&d, p)),
+        Attended::Skipped if token.is_cancelled() => Ok(vec![]),
+        Attended::Skipped => Err(format!("{why}؛ رد شد")),
+        Attended::TimedOut => Err(format!("{why}؛ در ۵ دقیقه انجام نشد")),
+    }
 }
 
 /// The platforms' own autocomplete: what people search around this product.
@@ -1962,8 +1994,7 @@ async fn suggestions(db: &Db, chosen: &[&Platform], query: &str) -> Vec<String> 
                 city: "",
             },
         );
-        let Ok(Ok(r)) = tokio::time::timeout(Duration::from_secs(6), http().get(&url).send()).await
-        else {
+        let Ok(Ok(r)) = tokio::time::timeout(Duration::from_secs(6), http().get(&url).send()).await else {
             continue;
         };
         let Ok(v) = r.json::<Value>().await else { continue };
@@ -1972,11 +2003,7 @@ async fn suggestions(db: &Db, chosen: &[&Platform], query: &str) -> Vec<String> 
         for t in texts {
             let t = t.trim().to_string();
             let w = words(&t);
-            if (2..=60).contains(&t.chars().count())
-                && w.iter().any(|x| tok_eq(x, &head))
-                && words(query) != w
-                && !out.iter().any(|o| words(o) == w)
-            {
+            if (2..=60).contains(&t.chars().count()) && w.iter().any(|x| tok_eq(x, &head)) && words(query) != w && !out.iter().any(|o| words(o) == w) {
                 out.push(t);
             }
         }
@@ -2002,7 +2029,7 @@ fn collect_texts(v: &Value, out: &mut Vec<String>, depth: usize) {
 
 /// Signs in to a platform in a visible window (the browser profile the searches use keeps the
 /// session). Returns when the user closes the window.
-pub async fn login(s: &Settings, profile: &Path, id: &str) -> Res<()> {
+pub async fn login(s: &Settings, profile: &Path, id: &str, token: &CancellationToken) -> Res<()> {
     let p = platform(id).ok_or("پلتفرم ناشناخته")?;
     let url = if p.login.is_empty() {
         p.page.replace("{q}", "").replace("{city}", "iran")
@@ -2012,10 +2039,7 @@ pub async fn login(s: &Settings, profile: &Path, id: &str) -> Res<()> {
     let mut eng = scanner::launch(s, profile, false, 0).await?;
     scanner::goto(&eng.list, &url).await;
     let deadline = std::time::Instant::now() + Duration::from_secs(20 * 60);
-    while !eng.proc.exited()
-        && eng.alive.load(std::sync::atomic::Ordering::Relaxed)
-        && std::time::Instant::now() < deadline
-    {
+    while !eng.proc.exited() && eng.alive.load(std::sync::atomic::Ordering::Relaxed) && std::time::Instant::now() < deadline && !token.is_cancelled() {
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
     scanner::shut(Some(eng)).await;
@@ -2044,8 +2068,10 @@ pub struct MarketReq {
     /// Neighbourhood / area inside the city (matched against the ad's location text).
     pub district: String,
     pub local_only: bool,
-    /// "seller" (pricing my product) or "buyer" (where to buy) — how the results are presented.
+    /// "seller" (pricing my product), "buyer" (where to buy) or "wholesale" (B2B suppliers).
     pub mode: String,
+    /// Also search the web (top 3 organic results) for this product.
+    pub web: bool,
 }
 
 impl Default for MarketReq {
@@ -2065,19 +2091,13 @@ impl Default for MarketReq {
             district: String::new(),
             local_only: false,
             mode: "seller".into(),
+            web: false,
         }
     }
 }
 
 /// Collects from every chosen platform, analyses, stores the snapshot (price history) and returns it.
-pub async fn search(
-    db: &Db,
-    s: &Settings,
-    profile: &Path,
-    req: &MarketReq,
-    token: &CancellationToken,
-    emit: Emit<'_>,
-) -> Res<Report> {
+pub async fn search(db: &Db, s: &Settings, profile: &Path, req: &MarketReq, token: &CancellationToken, emit: Emit<'_>) -> Res<Report> {
     let query = req.query.trim();
     if query.chars().count() < 2 {
         return Err("نام کالا را بنویسید؛ مثلاً «عسل» یا «زعفران سرگل».".into());
@@ -2089,75 +2109,91 @@ pub async fn search(
         .iter()
         .filter(|p| req.platforms.is_empty() || req.platforms.iter().any(|x| x == p.id))
         .collect();
-    let full_query = if req.brand.trim().is_empty() {
-        query.to_string()
-    } else {
-        format!("{query} {}", req.brand.trim())
+    // one or more products / alternatives to search («عسل یک کیلویی + شهد آزادی», «عسل -موم»)
+    let groups = parse_query(query);
+    let brand = req.brand.trim();
+    let search_phrase = |g: &QueryGroup| {
+        if brand.is_empty() {
+            g.phrase.clone()
+        } else {
+            format!("{} {brand}", g.phrase)
+        }
     };
-    let qw = words(query); // base query words for filtering logic
-    let mut all = vec![];
+    let mut all: Vec<Offer> = vec![];
     let mut status = vec![];
     let mut eng: Option<scanner::Engine> = None;
     for (i, p) in chosen.iter().enumerate() {
         if token.is_cancelled() {
             break;
         }
-        scanner::status(
-            emit,
-            format!(
-                "جستجوی «{full_query}» در {} ({} از {})",
-                p.name,
-                i + 1,
-                chosen.len()
-            ),
-        );
-        let r = tokio::select! {
-            r = collect_one(db, s, profile, p, req, &full_query, &mut eng, token, emit) => r,
-            _ = token.cancelled() => Ok(vec![]),
-        };
-        match r {
-            Ok(mut found) => {
-                for o in &mut found {
-                    o.url = absolute(&o.url, p);
-                }
-                let n = found
-                    .iter()
-                    .filter(|o| matches(&o.title, &qw, req.exact))
-                    .count();
-                scanner::log(
-                    emit,
-                    if n > 0 { "success" } else { "warning" },
-                    format!("{}: {} پیشنهاد مرتبط از {} نتیجه", p.name, n, found.len()),
-                );
-                status.push((p.id.to_string(), n, String::new()));
-                all.extend(found);
+        let mut found: Vec<Offer> = vec![];
+        let mut err: Option<String> = None;
+        for g in &groups {
+            if token.is_cancelled() {
+                break;
             }
-            Err(e) => {
-                scanner::log(emit, "warning", format!("{}: {e}", p.name));
-                status.push((p.id.to_string(), 0, e));
+            let phrase = search_phrase(g);
+            scanner::status(emit, format!("جستجوی «{phrase}» در {} ({} از {})", p.name, i + 1, chosen.len()));
+            let r = tokio::select! {
+                r = collect_one(db, s, profile, p, req, &phrase, &mut eng, token, emit) => r,
+                _ = token.cancelled() => Ok(vec![]),
+            };
+            match r {
+                Ok(mut got) => found.append(&mut got),
+                Err(e) => err = Some(e),
             }
         }
+        // dedup the same product found by two alternatives
+        let mut seen = std::collections::HashSet::new();
+        found.retain(|o| seen.insert((o.title.clone(), o.seller.clone(), o.price)));
+        for o in &mut found {
+            verify_links(o);
+        }
+        let relevant = found.iter().filter(|o| matches_groups(&o.title, &groups, req.exact)).count();
+        match (relevant, &err) {
+            (0, Some(e)) => {
+                scanner::log(emit, "warning", format!("{}: {e}", p.name));
+                status.push((p.id.to_string(), 0usize, e.clone()));
+            }
+            _ => {
+                scanner::log(
+                    emit,
+                    if relevant > 0 { "success" } else { "warning" },
+                    format!("{}: {relevant} پیشنهاد مرتبط از {} نتیجه", p.name, found.len()),
+                );
+                status.push((p.id.to_string(), relevant, String::new()));
+            }
+        }
+        all.extend(found);
         emit(ScanEvent::Progress {
-            keyword: full_query.clone(),
+            keyword: query.to_string(),
             collected: all.len() as i64,
             checked: (i + 1) as i64,
             found: all.len() as i64,
             target: chosen.len() as i64,
         });
     }
+    // web sources (top 3) and B2B suppliers, while the browser is still open
+    let wholesale = req.mode == "wholesale";
+    let (mut web, mut suppliers) = (vec![], vec![]);
+    if (req.web || wholesale) && !token.is_cancelled() {
+        if eng.is_none() {
+            eng = scanner::launch(s, profile, s.headless, 0).await.ok();
+        }
+        if let Some(e) = eng.as_ref() {
+            scanner::status(emit, "جستجوی وب و تأمین‌کنندگان…");
+            web = crate::web::results(&e.list, query, 3, token).await;
+            if wholesale {
+                suppliers = crate::web::suppliers(&e.list, query, token).await;
+            }
+        }
+    }
     scanner::shut(eng).await;
     // the user's price range and region, before any statistics
     let before = all.len();
-    all.retain(|o| {
-        (req.min_price <= 0 || o.price >= req.min_price)
-            && (req.max_price <= 0 || o.price <= req.max_price)
-    });
+    all.retain(|o| (req.min_price <= 0 || o.price >= req.min_price) && (req.max_price <= 0 || o.price <= req.max_price));
     let out_of_range = before - all.len();
-    let place = if req.district.trim().is_empty() {
-        &req.city
-    } else {
-        &req.district
-    };
+    let place = if req.district.trim().is_empty() { &req.city } else { &req.district };
     if req.local_only && !place.trim().is_empty() {
         let c = words(place);
         all.retain(|o| {
@@ -2169,22 +2205,22 @@ pub async fn search(
         query,
         &req.brand,
         all,
-        if req.target_margin > 0.0 {
-            req.target_margin
-        } else {
-            25.0
-        },
+        if req.target_margin > 0.0 { req.target_margin } else { 25.0 },
         req.exact,
     );
     report.platforms = status;
     report.out_of_range = out_of_range;
-    if report.offers.is_empty() {
+    report.web = web;
+    report.suppliers = suppliers;
+    if report.offers.is_empty() && report.web.is_empty() && report.suppliers.is_empty() {
         let hint = if out_of_range > 0 {
             format!(" {out_of_range} قیمت خارج از محدوده‌ای بود که دادید؛ محدوده را بازتر کنید.")
         } else {
             String::new()
         };
-        return Err(format!("هیچ پیشنهاد مرتبطی پیدا نشد.{hint} اگر نام محصول دقیق است، حالت «همه کلمات» را امتحان کنید یا املای دیگری بنویسید (مثلاً «کیسه فریز»)."));
+        return Err(format!(
+            "هیچ پیشنهاد مرتبطی پیدا نشد.{hint} اگر نام محصول دقیق است، حالت «همه کلمات» را امتحان کنید یا املای دیگری بنویسید (مثلاً «کیسه فریز»)."
+        ));
     }
     scanner::status(emit, "جستجوهای مرتبط…");
     let mut related = suggestions(db, &chosen, query).await;
@@ -2213,7 +2249,7 @@ pub async fn search(
 mod tests {
     #[test]
     fn smart_matching() {
-        use super::{matches, mine_brands, Offer, words};
+        use super::{matches, mine_brands, words, Offer};
         // exact product, not the accessory of another one
         assert!(matches("چوب پینگ پنگ دونیک مدل ۳۰۰", &words("چوب پینگ پنگ"), true));
         assert!(matches("خرید چوب پینگ‌پنگ باترفلای", &words("چوب پینگ پنگ"), true));
@@ -2257,11 +2293,7 @@ mod tests {
         let r = super::analyze(
             "کیسه فریزر",
             "آغوش",
-            vec![
-                o("کیسه فریزر آغوش ۳۰ عددی"),
-                o("کیسه فریز آغوش رول"),
-                o("کیسه فریزر گلرنگ"),
-            ],
+            vec![o("کیسه فریزر آغوش ۳۰ عددی"), o("کیسه فریز آغوش رول"), o("کیسه فریزر گلرنگ")],
             20.0,
         );
         assert_eq!(r.offers.len(), 2, "brand filter keeps both «آغوش» offers");
@@ -2280,10 +2312,7 @@ mod tests {
         assert_eq!(v, vec!["آغوش", "بهداد", "پاکشو", "گلرنگ", "Zara"]);
         assert_eq!(super::brand_key("برند خوانسار"), super::brand_key("خوانسار"));
         let j = serde_json::json!({"images": {"main": {"url": ["https://dkstatics.ir/a.jpg"]}}});
-        assert_eq!(
-            super::image_of(&j["images"], 3).as_deref(),
-            Some("https://dkstatics.ir/a.jpg")
-        );
+        assert_eq!(super::image_of(&j["images"], 3).as_deref(), Some("https://dkstatics.ir/a.jpg"));
         assert_eq!(
             super::date_of(&serde_json::json!(1_760_000_000_000_i64)).as_deref(),
             Some("2025-10-09 08:53:20")
@@ -2291,25 +2320,39 @@ mod tests {
     }
 
     #[test]
-    fn links_are_absolute() {
-        let p = super::platform("basalam").unwrap();
-        assert_eq!(super::absolute("/p/12", p), "https://basalam.com/p/12");
-        assert_eq!(super::absolute("https://x.ir/a", p), "https://x.ir/a");
-        assert_eq!(super::absolute("", p), "");
+    fn links_are_exact_or_dropped() {
+        let mut o = Offer {
+            platform: "basalam".into(),
+            url: "/shahd/product/12".into(),
+            seller_url: "/shahd".into(),
+            ..Default::default()
+        };
+        super::verify_links(&mut o);
+        assert_eq!(
+            (o.url.as_str(), o.link.as_str(), o.seller_url.as_str()),
+            ("https://basalam.com/shahd/product/12", "exact", "https://basalam.com/shahd")
+        );
+        let mut home = Offer {
+            platform: "basalam".into(),
+            url: "https://basalam.com/".into(),
+            ..Default::default()
+        };
+        super::verify_links(&mut home);
+        assert_eq!((home.url.as_str(), home.link.as_str()), ("", ""), "the home page is never a product link");
+        let mut search = Offer {
+            platform: "digikala".into(),
+            url: "https://www.digikala.com/search/?q=x".into(),
+            ..Default::default()
+        };
+        super::verify_links(&mut search);
+        assert!(search.url.is_empty());
         assert!(super::platform("divar").is_some());
     }
 
     use super::*;
     use serde_json::json;
 
-    fn offer(
-        platform: &str,
-        title: &str,
-        price: i64,
-        seller: &str,
-        rating: Option<f64>,
-        reviews: i64,
-    ) -> Offer {
+    fn offer(platform: &str, title: &str, price: i64, seller: &str, rating: Option<f64>, reviews: i64) -> Offer {
         Offer {
             platform: platform.into(),
             title: title.into(),
@@ -2330,22 +2373,55 @@ mod tests {
         ]}});
         let o = offers_in(&dk, "digikala", true);
         assert_eq!(o.len(), 1);
-        assert_eq!(
-            (o[0].price, o[0].brand.as_str(), o[0].seller.as_str()),
-            (245_000, "خوانسار", "فروشگاه الف")
-        );
+        assert_eq!((o[0].price, o[0].brand.as_str(), o[0].seller.as_str()), (245_000, "خوانسار", "فروشگاه الف"));
         assert!(o[0].rating.unwrap() > 4.0);
         // torob-like: plain fields, shop count text
-        let tb = json!({"results": [{"name1": "عسل کنار طبیعی ۱ کیلویی", "price": 610000, "shop_text": "در ۱۴ فروشگاه", "web_client_absolute_url": "/p/abc/"}]});
+        let tb =
+            json!({"results": [{"name1": "عسل کنار طبیعی ۱ کیلویی", "price": 610000, "shop_text": "در ۱۴ فروشگاه", "web_client_absolute_url": "/p/abc/"}]});
         let o = offers_in(&tb, "torob", false);
-        assert_eq!(
-            (o[0].price, o[0].shops, o[0].url.as_str()),
-            (610_000, 14, "/p/abc/")
-        );
+        assert_eq!((o[0].price, o[0].shops, o[0].url.as_str()), (610_000, 14, "https://torob.com/p/abc/"));
         // DOM cards with Persian digits
-        let card =
-            json!({"title": "زعفران سرگل یک مثقالی", "price": "۸۹۰٬۰۰۰", "url": "https://emalls.ir/x"});
+        let card = json!({"title": "زعفران سرگل یک مثقالی", "price": "۸۹۰٬۰۰۰", "url": "https://emalls.ir/x"});
         assert_eq!(offers_in(&card, "emalls", false)[0].price, 890_000);
+    }
+
+    #[test]
+    fn multi_query_and_exclude() {
+        use super::{matches_groups, parse_query};
+        let g = parse_query("عسل یک کیلویی + شهد آزادی");
+        assert_eq!(g.len(), 2);
+        assert!(matches_groups("عسل خوانسار 1 کیلویی", &g, true));
+        assert!(matches_groups("عسل شهد آزادی طبیعی", &g, false));
+        // «یا» as OR
+        let or = parse_query("عسل یا شهد آزادی");
+        assert_eq!(or.len(), 2);
+        // exclude: «عسل -موم» drops honeycomb offers
+        let ex = parse_query("عسل -موم");
+        assert_eq!(ex.len(), 1);
+        assert!(matches_groups("عسل طبیعی خوانسار", &ex, true));
+        assert!(!matches_groups("عسل موم دار", &ex, false), "excluded word «موم»");
+        // «منهای» keyword
+        let ex2 = parse_query("عسل منهای موم");
+        assert!(!matches_groups("عسل با موم", &ex2, false));
+        // a plain query is one group
+        assert_eq!(parse_query("عسل خوانسار").len(), 1);
+    }
+
+    #[test]
+    fn number_and_size_equivalence() {
+        use super::{matches, words};
+        // «یک کیلویی» = «۱ کیلویی» = «1kg» = «1000 گرم» all match each other
+        for q in ["عسل یک کیلویی", "عسل ۱ کیلویی", "عسل 1 کیلویی", "عسل 1kg", "عسل ۱۰۰۰ گرم", "عسل یک کیلو"]
+        {
+            for title in ["عسل خوانسار 1 کیلویی", "عسل طبیعی یک کیلو", "عسل ۱۰۰۰ گرمی", "خرید عسل 1kg اصل"] {
+                assert!(matches(title, &words(q), true), "«{title}» should match «{q}»");
+            }
+        }
+        // a different size does not match a stated one
+        assert!(!matches("عسل خوانسار ۵۰۰ گرمی", &words("عسل 1 کیلویی"), true));
+        // «چهل» stays part of the product name, never read as the number 40
+        assert!(matches("عسل چهل گیاه خوانسار", &words("عسل چهل گیاه"), true));
+        assert_eq!(super::canon_toks(&words("یک کیلویی")), super::canon_toks(&words("۱۰۰۰ گرم")));
     }
 
     #[test]
@@ -2381,10 +2457,7 @@ mod tests {
         let total: f64 = r.channels.iter().map(|c| c.pct).sum();
         assert!((total - 100.0).abs() < 0.5);
         assert_eq!(r.tiers.iter().map(|t| t.count).sum::<usize>(), r.stats.count);
-        assert!(
-            r.offers.windows(2).all(|w| w[0].value >= w[1].value),
-            "sorted by value score"
-        );
+        assert!(r.offers.windows(2).all(|w| w[0].value >= w[1].value), "sorted by value score");
         assert!(r.subcategories.iter().any(|s| s == "عسل گون"));
         assert!(r.brand_chips.iter().any(|b| b == "خوانسار"));
         assert!(!r.advice.buy_from.is_empty() && r.advice.sell_price == r.srp);

@@ -14,7 +14,12 @@ fn base() -> String {
 }
 
 async fn get(http: &reqwest::Client, key: &str, url: String) -> Res<Value> {
-    let resp = http.get(url).header("Api-Key", key).send().await.map_err(|e| format!("اتصال به نشان برقرار نشد: {e}"))?;
+    let resp = http
+        .get(url)
+        .header("Api-Key", key)
+        .send()
+        .await
+        .map_err(|e| format!("اتصال به نشان برقرار نشد: {e}"))?;
     match resp.status().as_u16() {
         200 => resp.json().await.map_err(|e| e.to_string()),
         401 | 403 => Err("کلید API نشان نامعتبر است یا سرویس «جستجو» و «ژئوکدینگ» برایش فعال نیست (پنل نشان).".into()),
@@ -36,7 +41,16 @@ async fn locate(http: &reqwest::Client, key: &str, area: &str) -> Res<(f64, f64)
 pub fn grid(lat: f64, lng: f64) -> Vec<(f64, f64)> {
     let mut v = vec![(lat, lng)];
     for d in [0.03, 0.06] {
-        for (a, b) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
+        for (a, b) in [
+            (1.0, 0.0),
+            (-1.0, 0.0),
+            (0.0, 1.0),
+            (0.0, -1.0),
+            (1.0, 1.0),
+            (1.0, -1.0),
+            (-1.0, 1.0),
+            (-1.0, -1.0),
+        ] {
             v.push((lat + a * d, lng + b * d));
         }
     }
@@ -47,7 +61,12 @@ pub fn grid(lat: f64, lng: f64) -> Vec<(f64, f64)> {
 pub fn business_titles(v: &Value, out: &mut Vec<String>) {
     for it in v["items"].as_array().into_iter().flatten() {
         let cat = it["category"].as_str().unwrap_or_default();
-        if cat == "region" || cat == "municipal" || it["type"].as_str().is_some_and(|t| ["street", "primary", "secondary", "neighbourhood", "city", "county"].contains(&t)) {
+        if cat == "region"
+            || cat == "municipal"
+            || it["type"]
+                .as_str()
+                .is_some_and(|t| ["street", "primary", "secondary", "neighbourhood", "city", "county"].contains(&t))
+        {
             continue;
         }
         let title = it["title"].as_str().unwrap_or_default().trim().to_string();
@@ -103,7 +122,11 @@ pub async fn run(db: &Db, s: &Settings, profile: &Path, req: &ScanRequest, token
             scanner::log(emit, "warning", format!("نشان برای «{kw}» در {area} کسب‌وکاری نداشت."));
             continue;
         }
-        scanner::log(emit, "muted", format!("نشان: {} کسب‌وکار «{kw}» پیدا شد؛ یافتن شماره‌ها در گوگل‌مپ…", titles.len()));
+        scanner::log(
+            emit,
+            "muted",
+            format!("نشان: {} کسب‌وکار «{kw}» پیدا شد؛ یافتن شماره‌ها در گوگل‌مپ…", titles.len()),
+        );
         let sub = ScanRequest {
             keywords: vec![kw.clone()],
             lookups: titles.clone(),
@@ -124,7 +147,11 @@ pub async fn run(db: &Db, s: &Settings, profile: &Path, req: &ScanRequest, token
     }
     sum.cancelled = token.is_cancelled();
     if sum.message.is_empty() {
-        let head = if sum.cancelled { "متوقف شد." } else { "پایان استخراج از نشان." };
+        let head = if sum.cancelled {
+            "متوقف شد."
+        } else {
+            "پایان استخراج از نشان."
+        };
         sum.message = format!("{head} {} کسب‌وکار بررسی و {} مخاطب جدید ذخیره شد.", sum.checked, sum.found);
     }
     Ok(sum)

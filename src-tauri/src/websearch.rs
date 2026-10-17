@@ -147,7 +147,11 @@ pub async fn search_attended(
             break true;
         }
     };
-    let out = if solved { search(&eng.list, query, pages, token).await } else { Err("تأیید «ربات نیستم» انجام نشد؛ پنجره بسته شد یا ۱۰ دقیقه گذشت.".into()) };
+    let out = if solved {
+        search(&eng.list, query, pages, token).await
+    } else {
+        Err("تأیید «ربات نیستم» انجام نشد؛ پنجره بسته شد یا ۱۰ دقیقه گذشت.".into())
+    };
     crate::scanner::shut(Some(eng)).await;
     out
 }
@@ -161,7 +165,10 @@ mod tests {
         // a1 + base64url("https://t.me/lamiz_cafe")
         let href = "https://www.bing.com/ck/a?!&&p=abc&u=a1aHR0cHM6Ly90Lm1lL2xhbWl6X2NhZmU&ntb=1";
         assert_eq!(real_url(href, ""), "https://t.me/lamiz_cafe");
-        assert_eq!(real_url("https://www.bing.com/ck/a?p=x", "https://instagram.com › cafe"), "https://instagram.com/cafe");
+        assert_eq!(
+            real_url("https://www.bing.com/ck/a?p=x", "https://instagram.com › cafe"),
+            "https://instagram.com/cafe"
+        );
         assert_eq!(real_url("https://balad.ir/p/x", ""), "https://balad.ir/p/x");
     }
 }
