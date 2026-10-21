@@ -20,6 +20,11 @@ export function h(tag, props, ...kids) {
     if (v == null || v === false) continue;
     if (k === "class") el.className = v;
     else if (k === "html") el.innerHTML = v; // static markup only (icons)
+    else if (k === "style") {
+      // the CSP forbids style attributes: only an object (set through CSSOM) is accepted
+      if (typeof v === "object") Object.assign(el.style, v);
+      else console.warn("inline style ignored (CSP): use a CSS class", v);
+    }
     else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
     else if (PROPS.has(k)) el[k] = v;
     else el.setAttribute(k, v === true ? "" : v);
@@ -437,4 +442,77 @@ export function skipWaitButton(label = "رد کردن و ادامه") {
     label,
   );
   return b;
+}
+
+/**
+ * A table whose body is windowed: only the rows near the viewport are in the DOM, so a 3000-row list scrolls as
+ * smoothly as a short one. Short lists (≤ minRows) are drawn whole. Filtering, selection and export work on the
+ * caller's full array — the window only decides which rows are drawn. Heights are set through CSSOM (CSP).
+ * vtable({ head: <thead>, cols?: <colgroup>, rows, row: (item, index) => <tr>, minRows, rowHeight })
+ *   → { el, setRows(rows, keepScroll), repaint() }
+ */
+export function vtable({ head, cols = null, rows = [], row, minRows = 60, rowHeight = 56, cls = "", tableCls = "" }) {
+  const OVER = 12;
+  const body = h("tbody");
+  const wrap = h("div", { class: `table-wrap vt ${cls}`.trim() }, h("table", { class: `t ${tableCls}`.trim() }, cols, head, body));
+  const ncols = () => head.querySelector("tr")?.children.length || 1;
+  let list = rows;
+  let est = rowHeight;
+  let from = 0;
+  let to = 0;
+  const gap = (px) => {
+    const td = h("td", { class: "vt-gap", colspan: ncols() });
+    td.style.height = `${Math.max(0, Math.round(px))}px`;
+    return h("tr", { class: "vt-gap-row", "aria-hidden": "true" }, td);
+  };
+  function paint(force) {
+    if (list.length <= minRows) {
+      wrap.classList.remove("windowed");
+      if (force || to !== list.length || from !== 0) body.replaceChildren(...list.map(row));
+      [from, to] = [0, list.length];
+      return;
+    }
+    wrap.classList.add("windowed");
+    const view = wrap.clientHeight || 600;
+    const first = Math.max(0, Math.floor(wrap.scrollTop / est));
+    const last = Math.min(list.length, Math.ceil((wrap.scrollTop + view) / est));
+    // the visible rows are still well inside the drawn window: nothing to do
+    if (!force && first >= from + (from > 0 ? 4 : 0) && last <= to - (to < list.length ? 4 : 0)) return;
+    const [a, b] = [Math.max(0, first - OVER), Math.min(list.length, last + OVER)];
+    const rowsEl = [];
+    for (let i = a; i < b; i++) rowsEl.push(row(list[i], i));
+    const [top, bottom] = [a > 0 ? gap(a * est) : null, b < list.length ? gap((list.length - b) * est) : null];
+    body.replaceChildren(...[top, ...rowsEl, bottom].filter(Boolean));
+    [from, to] = [a, b];
+    // learn the real row height (rows with two lines are taller than the estimate)
+    const real = [...body.querySelectorAll("tr:not(.vt-gap-row)")].map((r) => r.offsetHeight).filter(Boolean);
+    if (real.length) {
+      const avg = real.reduce((x, y) => x + y, 0) / real.length;
+      if (Math.abs(avg - est) > 1.5) {
+        est = avg;
+        if (top) top.firstElementChild.style.height = `${Math.round(a * est)}px`;
+        if (bottom) bottom.firstElementChild.style.height = `${Math.round((list.length - b) * est)}px`;
+      }
+    }
+  }
+  let queued = false;
+  wrap.addEventListener("scroll", () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => {
+      queued = false;
+      paint(false);
+    });
+  });
+  paint(true);
+  return {
+    el: wrap,
+    setRows(next, keepScroll = false) {
+      list = next;
+      if (!keepScroll) wrap.scrollTop = 0;
+      [from, to] = [0, 0];
+      paint(true);
+    },
+    repaint: () => paint(true),
+  };
 }

@@ -1,16 +1,21 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod admin;
+mod alerts;
 mod assist;
 mod background;
 mod balad;
 mod brand;
+mod buybox;
 mod channels;
 mod cloud;
 mod commands;
+mod crm;
 mod db;
 mod enrich;
 mod export;
+mod fees;
+mod fx;
 mod identity;
 mod instagram;
 mod jobs;
@@ -154,6 +159,11 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     log_line("INFO", &format!("start v{} ({})", env!("CARGO_PKG_VERSION"), license::EDITION));
     let db = Db::open(&dir.join("hamista.db"))?;
+    match db.prune_old_reports() {
+        Ok(n) if n > 0 => log_line("INFO", &format!("slimmed {n} old analysis reports")),
+        Ok(_) => {}
+        Err(e) => log_line("WARN", &format!("report upkeep failed: {e}")),
+    }
 
     let mut migrated = None;
     if !license::ISSUER && db.is_empty() && db.kv_get("migrated_v3").is_none() {
@@ -199,6 +209,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             log_line("WARN", &format!("tray: {e}"));
         }
         background::scheduler(app.handle().clone());
+        background::follow_ups(app.handle().clone());
     }
 
     // online licence: heartbeat + mega-bank upload + scenario, every 6 h while the app runs
@@ -271,6 +282,7 @@ fn main() {
     }));
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             if let Err(e) = setup_app(app) {
                 // Tauri would panic on a setup error; release builds have no console, so say it in a dialog
@@ -325,6 +337,9 @@ fn main() {
             commands::wait_skip,
             commands::product_list,
             commands::product_list_export,
+            commands::export_woocommerce_csv,
+            commands::export_basalam_xlsx,
+            commands::catalog_add,
             commands::campaign_run,
             commands::template_preview,
             commands::assist_open,
@@ -332,6 +347,11 @@ fn main() {
             commands::contact_app,
             commands::assist_session,
             commands::place_photo,
+            commands::place_logs,
+            commands::place_log_add,
+            commands::place_log_delete,
+            commands::follow_up_set,
+            commands::follow_ups_due,
             commands::city_photo,
             commands::brand_runs,
             commands::brand_run_get,
@@ -351,6 +371,12 @@ fn main() {
             commands::catalog_import,
             commands::catalog_delete,
             commands::catalog_check,
+            commands::catalog_track,
+            commands::alert_config,
+            commands::alert_test,
+            commands::profit_compare,
+            commands::fx_rates,
+            commands::fx_adjust,
             commands::brands,
             commands::brand_save,
             commands::brand_delete,

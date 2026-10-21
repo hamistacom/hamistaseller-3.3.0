@@ -5,6 +5,8 @@
 //! the change since the previous run becomes an alert when it passes the item's threshold.
 //! Catalogue items are searched with a short query and then identified among the results by
 //! `identity::match_item`, so only listings of exactly that product set its market price.
+use crate::alerts;
+use crate::buybox::{self, BuyBox};
 use crate::db::{err, Db, Res};
 use crate::identity;
 use crate::market::{self, History, MarketReq, Offer};
@@ -146,12 +148,20 @@ pub struct Watch {
     pub alert: String,
     pub error: String,
     pub created_at: String,
+    /// Buy-box tracking: the seller's name on the platforms and/or the link of their own listing.
+    pub my_seller_name: String,
+    pub my_product_url: String,
+    pub cost: i64,
+    pub min_margin_pct: f64,
+    /// "" (in-app only) | telegram | sms | both — where a lost buy box is reported.
+    pub alert_channel: String,
+    pub buybox: BuyBox,
     // view only
     pub history: Vec<History>,
     pub swing: Swing,
 }
 
-const WCOLS: &str = "id,name,req,own_price,alert_pct,enabled,last_run,last_id,median,min,prev_median,prev_min,basis,alert,error,created_at";
+const WCOLS: &str = "id,name,req,own_price,alert_pct,enabled,last_run,last_id,median,min,prev_median,prev_min,basis,alert,error,created_at,my_seller_name,my_product_url,min_margin_pct,alert_channel,cost,buybox";
 
 fn to_watch(r: &Row) -> rusqlite::Result<Watch> {
     Ok(Watch {
@@ -171,8 +181,30 @@ fn to_watch(r: &Row) -> rusqlite::Result<Watch> {
         alert: r.get(13)?,
         error: r.get(14)?,
         created_at: r.get(15)?,
+        my_seller_name: r.get(16)?,
+        my_product_url: r.get(17)?,
+        min_margin_pct: r.get(18)?,
+        alert_channel: r.get(19)?,
+        cost: r.get(20)?,
+        buybox: parse_box(&r.get::<_, String>(21)?),
         ..Default::default()
     })
+}
+
+fn parse_box(s: &str) -> BuyBox {
+    serde_json::from_str(s).unwrap_or_default()
+}
+
+/// What the seller typed about their own listing, checked before it is kept.
+fn tracking(my_seller: &str, my_url: &str, cost: i64, margin: f64, channel: &str) -> Res<(String, String)> {
+    let (seller, url) = (my_seller.trim(), my_url.trim());
+    if seller.chars().count() > 80 || url.chars().count() > 500 || (!url.is_empty() && !url.starts_with("http")) {
+        return Err("نام فروشگاه (حداکثر ۸۰ حرف) یا لینک کالای شما (باید با http شروع شود) نامعتبر است.".into());
+    }
+    if cost < 0 || !(0.0..=90.0).contains(&margin) || !matches!(channel, "" | "telegram" | "sms" | "both") {
+        return Err("بهای خرید، حداقل حاشیه سود یا کانال هشدار نامعتبر است.".into());
+    }
+    Ok((seller.into(), url.into()))
 }
 
 fn rows(db: &Db, where_: &str) -> Res<Vec<Watch>> {
@@ -221,6 +253,7 @@ pub fn save(db: &Db, w: &Watch) -> Res<i64> {
     })
     .map_err(err)?;
     let pct = if w.alert_pct > 0.0 { w.alert_pct } else { 5.0 };
+    let (seller, url) = tracking(&w.my_seller_name, &w.my_product_url, w.cost, w.min_margin_pct, &w.alert_channel)?;
     let c = db.c();
     if w.id == 0 {
         // the same product and brand is watched once
@@ -241,22 +274,22 @@ pub fn save(db: &Db, w: &Watch) -> Res<i64> {
         };
         if let Some(id) = dup {
             c.execute(
-                "UPDATE watch SET own_price=?1, alert_pct=?2, enabled=1 WHERE id=?3",
-                params![w.own_price, pct, id],
+                "UPDATE watch SET own_price=?1, alert_pct=?2, enabled=1, my_seller_name=?4, my_product_url=?5, cost=?6, min_margin_pct=?7, alert_channel=?8 WHERE id=?3",
+                params![w.own_price, pct, id, seller, url, w.cost, w.min_margin_pct, w.alert_channel],
             )
             .map_err(err)?;
             return Ok(id);
         }
         c.execute(
-            "INSERT INTO watch(name,req,own_price,alert_pct) VALUES(?1,?2,?3,?4)",
-            params![name, req, w.own_price, pct],
+            "INSERT INTO watch(name,req,own_price,alert_pct,my_seller_name,my_product_url,cost,min_margin_pct,alert_channel) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            params![name, req, w.own_price, pct, seller, url, w.cost, w.min_margin_pct, w.alert_channel],
         )
         .map_err(err)?;
         Ok(c.last_insert_rowid())
     } else {
         c.execute(
-            "UPDATE watch SET name=?1,req=?2,own_price=?3,alert_pct=?4,enabled=?5 WHERE id=?6",
-            params![name, req, w.own_price, pct, w.enabled as i64, w.id],
+            "UPDATE watch SET name=?1,req=?2,own_price=?3,alert_pct=?4,enabled=?5,my_seller_name=?7,my_product_url=?8,cost=?9,min_margin_pct=?10,alert_channel=?11 WHERE id=?6",
+            params![name, req, w.own_price, pct, w.enabled as i64, w.id, seller, url, w.cost, w.min_margin_pct, w.alert_channel],
         )
         .map_err(err)?;
         Ok(w.id)
@@ -292,6 +325,21 @@ pub fn due(db: &Db) -> Vec<i64> {
         .unwrap_or_default()
 }
 
+/// Reports a lost (or regained) buy box on the item's alert channel; a failed send is logged, never fatal.
+async fn tell(db: &Db, name: &str, channel: &str, prev: &BuyBox, now: &BuyBox, emit: Emit<'_>) {
+    if !alerts::should_notify(&prev.status, &now.status) {
+        return;
+    }
+    db.log("watch", &format!("بای‌باکس «{name}»: {}", if now.status == buybox::LOST { "از دست رفت" } else { "پس گرفته شد" }));
+    if channel.is_empty() {
+        return;
+    }
+    match alerts::send(db, channel, &alerts::message(name, now)).await {
+        Ok(()) => scanner::log(emit, "success", format!("{name}: هشدار بای‌باکس ارسال شد")),
+        Err(e) => scanner::log(emit, "warning", format!("{name}: هشدار بای‌باکس ارسال نشد — {e}")),
+    }
+}
+
 /// Re-analyses the given items (all enabled ones when `ids` is empty), one after another.
 pub async fn run(db: &Db, s: &Settings, profile: &Path, ids: &[i64], token: &CancellationToken, emit: Emit<'_>) -> Res<Summary> {
     let items: Vec<Watch> = rows(db, "WHERE enabled=1")?
@@ -308,6 +356,17 @@ pub async fn run(db: &Db, s: &Settings, profile: &Path, ids: &[i64], token: &Can
         }
         scanner::status(emit, format!("پایش {} از {}: «{}»", i + 1, items.len(), w.name));
         let res = market::search(db, s, profile, &w.req, token, emit).await;
+        let bb = match &res {
+            Ok(r) if !w.my_seller_name.is_empty() || !w.my_product_url.is_empty() => {
+                let (idx, _) = identity::match_item(&w.req.query, &w.req.brand, &r.offers);
+                let same: Vec<&Offer> = if idx.is_empty() { r.offers.iter().collect() } else { idx.iter().map(|&j| &r.offers[j]).collect() };
+                let now = buybox::buybox(&same, &buybox::Mine { seller: &w.my_seller_name, url: &w.my_product_url, cost: w.cost, min_margin_pct: w.min_margin_pct, category: &w.req.query });
+                tell(db, &w.name, &w.alert_channel, &w.buybox, &now, emit).await;
+                Some(now)
+            }
+            _ => None,
+        };
+        let bb_json = serde_json::to_string(bb.as_ref().unwrap_or(&w.buybox)).map_err(err)?;
         let c = db.c();
         let done = match res {
             Ok(r) => {
@@ -319,8 +378,8 @@ pub async fn run(db: &Db, s: &Settings, profile: &Path, ids: &[i64], token: &Can
                     scanner::log(emit, "warning", format!("{}: {a}", w.name));
                 }
                 c.execute(
-                    "UPDATE watch SET last_run=datetime('now','localtime'), last_id=?1, prev_median=median, prev_min=min, median=?2, min=?3, basis=?4, alert=?5, error='' WHERE id=?6",
-                    params![r.id, r.stats.median, r.stats.min, r.stats.basis, a, w.id],
+                    "UPDATE watch SET last_run=datetime('now','localtime'), last_id=?1, prev_median=median, prev_min=min, median=?2, min=?3, basis=?4, alert=?5, error='', buybox=?7 WHERE id=?6",
+                    params![r.id, r.stats.median, r.stats.min, r.stats.basis, a, w.id, bb_json],
                 )
                 .map(|_| a)
             }
@@ -399,6 +458,11 @@ pub struct Item {
     pub run_id: i64,
     pub note: String,
     pub checked_at: String,
+    pub my_seller_name: String,
+    pub my_product_url: String,
+    pub min_margin_pct: f64,
+    pub alert_channel: String,
+    pub buybox: BuyBox,
     /// View only: the search text used for this item (also what a watch of it searches).
     pub query: String,
 }
@@ -453,7 +517,7 @@ pub fn evaluate(item: &Item, offers: &[&Offer], margin: f64) -> Item {
     out
 }
 
-const ICOLS: &str = "id,name,sku,brand,own_price,cost,matched,confidence,min,median,max,srp,position,matches,run_id,note,checked_at";
+const ICOLS: &str = "id,name,sku,brand,own_price,cost,matched,confidence,min,median,max,srp,position,matches,run_id,note,checked_at,my_seller_name,my_product_url,min_margin_pct,alert_channel,buybox";
 
 fn to_item(r: &Row) -> rusqlite::Result<Item> {
     Ok(Item {
@@ -474,6 +538,11 @@ fn to_item(r: &Row) -> rusqlite::Result<Item> {
         run_id: r.get(14)?,
         note: r.get(15)?,
         checked_at: r.get(16)?,
+        my_seller_name: r.get(17)?,
+        my_product_url: r.get(18)?,
+        min_margin_pct: r.get(19)?,
+        alert_channel: r.get(20)?,
+        buybox: parse_box(&r.get::<_, String>(21)?),
         query: String::new(),
     })
 }
@@ -484,6 +553,18 @@ pub fn items(db: &Db) -> Res<Vec<Item>> {
     let mut v = st.query_map([], to_item).map_err(err)?.collect::<Result<Vec<Item>, _>>().map_err(err)?;
     v.iter_mut().for_each(|i| i.query = identity::search_query(&i.name, &i.brand));
     Ok(v)
+}
+
+/// Sets what the buy-box check needs for one catalogue item.
+pub fn track_item(db: &Db, id: i64, seller: &str, url: &str, margin: f64, channel: &str) -> Res<()> {
+    let (seller, url) = tracking(seller, url, 0, margin, channel)?;
+    db.c()
+        .execute(
+            "UPDATE catalog SET my_seller_name=?1, my_product_url=?2, min_margin_pct=?3, alert_channel=?4, buybox='' WHERE id=?5",
+            params![seller, url, margin, channel, id],
+        )
+        .map(|_| ())
+        .map_err(err)
 }
 
 pub fn delete_items(db: &Db, ids: &[i64]) -> Res<()> {
@@ -536,7 +617,7 @@ fn money(s: &str) -> i64 {
 
 /// Rows of an Excel / CSV file → (name, sku, brand, price, cost). The first row with a name column
 /// is the header; without one, column 1 is the name and column 2 the price.
-pub fn parse_catalog(rows: &[Vec<String>]) -> (Vec<(String, String, String, i64, i64)>, Vec<String>) {
+pub fn parse_catalog(rows: &[Vec<String>]) -> (Vec<CatalogRow>, Vec<String>) {
     let head = rows.iter().take(10).position(|r| r.iter().any(|h| column(h) == "name"));
     let (cols, start, rial): (Vec<&str>, usize, Vec<bool>) = match head {
         Some(i) => (
@@ -569,6 +650,9 @@ pub fn parse_catalog(rows: &[Vec<String>]) -> (Vec<(String, String, String, i64,
     (out, cols.iter().map(|c| c.to_string()).collect())
 }
 
+/// One catalogue line: (name, sku, brand, price, cost).
+pub type CatalogRow = (String, String, String, i64, i64);
+
 pub fn import(db: &Db, file_name: &str, data: Vec<u8>) -> Res<CatalogImport> {
     let rows = crate::export::read_rows(file_name, data)?;
     let (items, columns) = parse_catalog(&rows);
@@ -580,6 +664,15 @@ pub fn import(db: &Db, file_name: &str, data: Vec<u8>) -> Res<CatalogImport> {
     if items.is_empty() {
         return Err("کالایی در فایل پیدا نشد. ستون «نام کالا» لازم است؛ «قیمت فروش»، «قیمت خرید»، «برند» و «کد کالا» اختیاری‌اند.".into());
     }
+    let n = upsert(db, items)?;
+    rep.added = n.added;
+    rep.updated = n.updated;
+    Ok(rep)
+}
+
+/// Adds items to the catalogue (an item with the same name and code is updated): (name, sku, brand, price, cost).
+pub fn upsert(db: &Db, items: Vec<CatalogRow>) -> Res<CatalogImport> {
+    let mut rep = CatalogImport::default();
     let mut c = db.c();
     let tx = c.transaction().map_err(err)?;
     for (name, sku, brand, price, cost) in items {
@@ -639,9 +732,11 @@ pub async fn check(
             target_margin: margin,
             ..Default::default()
         };
+        let mut rival_offers: Vec<Offer> = vec![];
         let out = match market::search(db, s, profile, &req, token, emit).await {
             Ok(r) => {
                 let (idx, conf) = identity::match_item(&it.name, &it.brand, &r.offers);
+                rival_offers = idx.iter().map(|&j| r.offers[j].clone()).collect();
                 let picked: Vec<&Offer> = idx.iter().map(|&j| &r.offers[j]).collect();
                 let mut e = evaluate(it, &picked, margin);
                 e.confidence = conf.into();
@@ -684,10 +779,19 @@ pub async fn check(
                 }
             }
         };
+        let tracked = !it.my_seller_name.is_empty() || !it.my_product_url.is_empty();
+        let bb = if tracked && out.matched > 0 {
+            let offers: Vec<&Offer> = rival_offers.iter().collect();
+            let now = buybox::buybox(&offers, &buybox::Mine { seller: &it.my_seller_name, url: &it.my_product_url, cost: it.cost, min_margin_pct: it.min_margin_pct, category: &it.name });
+            tell(db, &it.name, &it.alert_channel, &it.buybox, &now, emit).await;
+            now
+        } else {
+            it.buybox.clone()
+        };
         db.c()
             .execute(
-                "UPDATE catalog SET matched=?1, confidence=?2, min=?3, median=?4, max=?5, srp=?6, position=?7, matches=?8, run_id=?9, note=?10, checked_at=datetime('now','localtime') WHERE id=?11",
-                params![out.matched, out.confidence, out.min, out.median, out.max, out.srp, out.position, serde_json::to_string(&out.matches).map_err(err)?, out.run_id, out.note, it.id],
+                "UPDATE catalog SET buybox=?12, matched=?1, confidence=?2, min=?3, median=?4, max=?5, srp=?6, position=?7, matches=?8, run_id=?9, note=?10, checked_at=datetime('now','localtime') WHERE id=?11",
+                params![out.matched, out.confidence, out.min, out.median, out.max, out.srp, out.position, serde_json::to_string(&out.matches).map_err(err)?, out.run_id, out.note, it.id, serde_json::to_string(&bb).map_err(err)?],
             )
             .map_err(err)?;
         emit(scanner::ScanEvent::Progress {

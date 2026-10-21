@@ -800,9 +800,149 @@ pub fn export_xlsx(r: &ListReport, dir: &Path) -> Res<String> {
     Ok(path.display().to_string())
 }
 
+// ---------------- store exports ----------------
+
+/// A stable code for a product that has none: the same product always gets the same one.
+fn sku_of(it: &Item) -> String {
+    use sha2::{Digest, Sha256};
+    let key = if it.url.is_empty() { &it.title } else { &it.url };
+    let h = Sha256::digest(key.as_bytes());
+    format!("HS-{}", h[..4].iter().map(|b| format!("{b:02X}")).collect::<String>())
+}
+
+fn csv_cell(s: &str) -> String {
+    let clean: String = s.chars().map(|c| if c == '\r' || c == '\n' { ' ' } else { c }).collect();
+    // a cell that starts like a formula is text, not a formula (spreadsheet injection)
+    let clean = if clean.starts_with(['=', '+', '@']) || (clean.starts_with('-') && clean.len() > 1 && !clean[1..].starts_with(|c: char| c.is_ascii_digit())) { format!("'{clean}") } else { clean };
+    format!("\"{}\"", clean.replace('"', "\"\""))
+}
+
+fn in_stock(it: &Item) -> bool {
+    !(it.availability.contains("ناموجود") || it.availability.contains("اتمام") || it.availability.to_lowercase().contains("out"))
+}
+
+/// WooCommerce's product-importer CSV (UTF-8 with BOM, so Persian opens right in Excel and WordPress).
+/// Prices stay in Toman — set the store currency to Toman, or ×10 for Rial.
+pub fn woocommerce_csv(items: &[Item]) -> String {
+    const HEAD: &[&str] = &[
+        "Type", "SKU", "Name", "Published", "Is featured?", "Visibility in catalog", "Short description", "Description", "Tax status", "In stock?", "Regular price", "Categories", "Tags", "Images",
+    ];
+    let mut out = String::from("\u{FEFF}");
+    out.push_str(&HEAD.iter().map(|h| csv_cell(h)).collect::<Vec<_>>().join(","));
+    out.push_str("\r\n");
+    for it in items {
+        let group = crate::fees::group_name(crate::fees::group_of(&it.title));
+        let short: String = it.description.chars().take(160).collect();
+        let cells = [
+            "simple".to_string(),
+            sku_of(it),
+            it.title.clone(),
+            "1".into(),
+            "0".into(),
+            "visible".into(),
+            short,
+            it.description.clone(),
+            "taxable".into(),
+            if in_stock(it) { "1" } else { "0" }.into(),
+            if it.price > 0 { it.price.to_string() } else { String::new() },
+            group.to_string(),
+            it.brand.clone(),
+            it.image.clone(),
+        ];
+        out.push_str(&cells.iter().map(|c| csv_cell(c)).collect::<Vec<_>>().join(","));
+        out.push_str("\r\n");
+    }
+    out
+}
+
+fn export_path(dir: &Path, stem: &str, ext: &str) -> Res<std::path::PathBuf> {
+    std::fs::create_dir_all(dir).map_err(err)?;
+    let stamp = crate::market::iso_utc(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)).replace([' ', ':'], "-");
+    Ok(dir.join(format!("{stem}-{stamp}.{ext}")))
+}
+
+pub fn export_woocommerce_csv(items: &[Item], dir: &Path) -> Res<String> {
+    if items.is_empty() {
+        return Err("محصولی انتخاب نشده است.".into());
+    }
+    let path = export_path(dir, "woocommerce", "csv")?;
+    std::fs::write(&path, woocommerce_csv(items)).map_err(err)?;
+    Ok(path.display().to_string())
+}
+
+/// A bulk-upload sheet for Basalam's seller panel: name, price (Toman), stock, category, brand, description
+/// and up to three picture links. The panel's own column names can change; map them on upload if it asks.
+pub fn export_basalam_xlsx(items: &[Item], dir: &Path) -> Res<String> {
+    use rust_xlsxwriter::{Format, Workbook};
+    if items.is_empty() {
+        return Err("محصولی انتخاب نشده است.".into());
+    }
+    let path = export_path(dir, "basalam", "xlsx")?;
+    let mut wb = Workbook::new();
+    let ws = wb.add_worksheet();
+    ws.set_name("محصولات").map_err(err)?;
+    ws.set_right_to_left(true);
+    let bold = Format::new().set_bold();
+    let money = Format::new().set_num_format("#,##0");
+    const HEAD: &[&str] = &["کد کالا", "نام محصول", "قیمت (تومان)", "موجودی", "دسته‌بندی", "برند", "توضیحات", "تصویر ۱", "تصویر ۲", "تصویر ۳"];
+    for (c, h) in HEAD.iter().enumerate() {
+        ws.write_string_with_format(0, c as u16, *h, &bold).map_err(err)?;
+    }
+    for (i, it) in items.iter().enumerate() {
+        let row = i as u32 + 1;
+        ws.write_string(row, 0, sku_of(it)).map_err(err)?;
+        ws.write_string(row, 1, it.title.chars().take(120).collect::<String>()).map_err(err)?;
+        if it.price > 0 {
+            ws.write_number_with_format(row, 2, it.price as f64, &money).map_err(err)?;
+        }
+        ws.write_number(row, 3, if in_stock(it) { 1.0 } else { 0.0 }).map_err(err)?;
+        ws.write_string(row, 4, crate::fees::group_name(crate::fees::group_of(&it.title))).map_err(err)?;
+        ws.write_string(row, 5, &it.brand).map_err(err)?;
+        ws.write_string(row, 6, &it.description).map_err(err)?;
+        if !it.image.is_empty() {
+            ws.write_string(row, 7, &it.image).map_err(err)?;
+        }
+    }
+    ws.set_freeze_panes(1, 0).map_err(err)?;
+    ws.set_column_width(1, 48).map_err(err)?;
+    ws.set_column_width(6, 60).map_err(err)?;
+    wb.save(&path).map_err(err)?;
+    Ok(path.display().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn woocommerce_csv_is_importable() {
+        let items = vec![
+            Item { title: "عسل گون \"ویژه\" ۵۰۰ گرمی".into(), price: 450_000, url: "https://x.ir/p/1".into(), image: "https://x.ir/1.jpg".into(), brand: "خوانسار".into(), description: "خط۱\nخط۲".into(), ..Default::default() },
+            Item { title: "=HYPERLINK(\"x\")".into(), availability: "ناموجود".into(), ..Default::default() },
+        ];
+        let csv = woocommerce_csv(&items);
+        assert!(csv.starts_with('\u{FEFF}'), "BOM for Persian text");
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].contains("\"Regular price\"") && lines[0].contains("\"Images\""));
+        assert!(lines[1].contains("\"عسل گون \"\"ویژه\"\" ۵۰۰ گرمی\"") && lines[1].contains("\"450000\"") && lines[1].contains("\"مواد غذایی\""), "{}", lines[1]);
+        assert!(lines[1].contains("خط۱ خط۲"), "a newline would break the row");
+        assert!(lines[2].contains("\"'=HYPERLINK") && lines[2].contains("\"0\",\"\""), "formula neutralised, out of stock: {}", lines[2]);
+        assert_eq!(sku_of(&items[0]), sku_of(&items[0].clone()));
+        assert!(sku_of(&items[0]).starts_with("HS-") && sku_of(&items[0]) != sku_of(&items[1]));
+    }
+
+    #[test]
+    fn store_exports_write_files() {
+        let dir = std::env::temp_dir().join(format!("hs-exp-{}", std::process::id()));
+        let items = vec![Item { title: "کالا".into(), price: 1000, ..Default::default() }];
+        let csv = export_woocommerce_csv(&items, &dir).unwrap();
+        let xlsx = export_basalam_xlsx(&items, &dir).unwrap();
+        assert!(csv.ends_with(".csv") && std::fs::metadata(&csv).unwrap().len() > 50);
+        assert!(xlsx.ends_with(".xlsx") && std::fs::metadata(&xlsx).unwrap().len() > 500);
+        assert!(export_woocommerce_csv(&[], &dir).is_err() && export_basalam_xlsx(&[], &dir).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn scope_is_strict() {

@@ -2,6 +2,81 @@
 import { h, icon, invoke, modal, safe, copy, field, input, select, toast, confirmBox, jdate, fa, handle, initial, appBadges, KIND, KINDS, STATUS } from "../core.js";
 import { app, go, listName, bankOptions, refreshLists } from "../state.js";
 
+const LOG = { call: ["تماس", "phone"], message: ["پیام", "chat"], meeting: ["جلسه", "users"], deal: ["معامله", "award"], note: ["یادداشت", "edit"] };
+const pad2 = (n) => String(n).padStart(2, "0");
+/** Date → "YYYY-MM-DD HH:MM" (local), the form the backend keeps. */
+const stamp = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+const toLocalInput = (s) => (s ? s.replace(" ", "T") : "");
+const fromLocalInput = (s) => (s ? s.replace("T", " ").slice(0, 16) : "");
+
+/** B2B follow-up: the next reminder and a timeline of calls, messages, meetings and deals. */
+function crmSection(p, onChange) {
+  const timeline = h("div", { class: "crm-list" });
+  const next = input({ type: "datetime-local", dir: "ltr", value: toLocalInput(p.followUpAt) });
+  const kind = select(Object.entries(LOG).map(([k, v]) => [k, v[0]]), "call");
+  const note = h("textarea", { class: "input", rows: 2, placeholder: "چه گفتید و چه قولی گرفتید؟" });
+  const nextLog = input({ type: "datetime-local", dir: "ltr" });
+  const load = async () => {
+    const logs = (await safe(invoke("place_logs", { id: p.id }))) || [];
+    timeline.replaceChildren(
+      ...(logs.length
+        ? logs.map((l) => {
+            const [label, ic] = LOG[l.kind] || LOG.note;
+            return h(
+              "div",
+              { class: `crm-item k-${l.kind}` },
+              h("span", { class: "crm-k" }, icon(ic, "sm"), label),
+              h("div", { class: "grow stack tight" }, h("span", { class: "crm-note" }, l.note), h("span", { class: "small muted" }, jdate(l.createdAt, true))),
+              h("button", { class: "btn ghost sm icon-only", type: "button", "aria-label": "حذف", onclick: async () => { if ((await safe(invoke("place_log_delete", { id: l.id }))) !== undefined) load(); } }, icon("trash", "sm")),
+            );
+          })
+        : [h("div", { class: "small muted" }, "هنوز تعاملی ثبت نشده است.")]),
+    );
+  };
+  const setNext = async (value, msg) => {
+    if ((await safe(invoke("follow_up_set", { id: p.id, at: value }), msg)) === undefined) return;
+    p.followUpAt = value;
+    next.value = toLocalInput(value);
+    onChange?.();
+  };
+  const soon = (days) => () => {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    d.setHours(10, 0, 0, 0);
+    setNext(stamp(d), "پیگیری زمان‌بندی شد");
+  };
+  const add = async () => {
+    const r = await safe(invoke("place_log_add", { id: p.id, kind: kind.value, note: note.value, next: nextLog.value ? fromLocalInput(nextLog.value) : null }), "در تایم‌لاین ثبت شد");
+    if (r === undefined) return;
+    note.value = "";
+    if (nextLog.value) {
+      p.followUpAt = fromLocalInput(nextLog.value);
+      next.value = nextLog.value;
+      nextLog.value = "";
+    }
+    load();
+    onChange?.();
+  };
+  load();
+  return h(
+    "div",
+    { class: "stack crm" },
+    h("span", { class: "label-t" }, "پیگیری و تایم‌لاین مذاکره"),
+    h(
+      "div",
+      { class: "row wrap crm-next" },
+      field("پیگیری بعدی", next),
+      h("button", { class: "btn sm", type: "button", onclick: () => setNext(next.value ? fromLocalInput(next.value) : "", next.value ? "پیگیری زمان‌بندی شد" : "پیگیری حذف شد") }, icon("clock", "sm"), "ثبت زمان"),
+      h("button", { class: "btn ghost sm", type: "button", onclick: soon(1) }, "فردا"),
+      h("button", { class: "btn ghost sm", type: "button", onclick: soon(3) }, "۳ روز بعد"),
+      h("button", { class: "btn ghost sm", type: "button", onclick: soon(7) }, "هفته بعد"),
+      p.followUpAt ? h("button", { class: "btn ghost sm", type: "button", onclick: () => setNext("", "پیگیری حذف شد") }, icon("x", "sm"), "حذف زمان") : null,
+    ),
+    h("div", { class: "crm-form" }, field("نوع", kind), field("شرح تعامل", note), field("پیگیری بعدی (اختیاری)", nextLog), h("button", { class: "btn sm primary", type: "button", onclick: add }, icon("plus", "sm"), "ثبت")),
+    timeline,
+  );
+}
+
 const SOCIAL = ["instagram", "telegram", "whatsapp", "eitaa", "bale"];
 
 function contactRow(c, place) {
@@ -62,7 +137,7 @@ function contactRow(c, place) {
       { class: "v" },
       h("span", { class: isLink || c.kind === "email" || c.kind === "mobile" || c.kind === "landline" ? "ltr" : "", title: c.value }, isLink ? handle(c.value) || c.value : c.value),
       appBadges(c),
-      c.label ? h("span", { class: "small muted", style: "margin-inline-start:6px" }, `(${c.label})`) : null,
+      c.label ? h("span", { class: "small muted ms-6" }, `(${c.label})`) : null,
     ),
     c.origin === "website" ? h("span", { class: "pill", title: "از سایت خود کسب‌وکار" }, "سایت") : null,
     c.origin === "divar" ? h("span", { class: "pill info", title: "استخراج‌شده از اطلاعات تماس دیوار" }, "دیوار") : null,
@@ -152,6 +227,7 @@ export async function openCard(id, { onChange } = {}) {
         note,
       ),
     ),
+    crmSection(p, onChange),
   ];
 
   const m = modal({

@@ -66,6 +66,8 @@ export function followScheduled() {
     Object.assign(job, { scheduled: true, kind: p.kind || "scan", title: p.title || "استخراج زمان‌بندی‌شده", running: true, status: "در حال شروع…", progress: null, sending: null, captcha: "", logs: [], found: [], result: null });
     notify();
   });
+  // a B2B follow-up came due (the system notification is sent by the backend; this one is for the open window)
+  listen("follow-ups", (p) => toast(`${(p.count || 0).toLocaleString("fa-IR")} پیگیری سررسید شد: ${(p.names || []).join("، ")}`, "ok"));
   // only for a job the scheduler started — never touch the user's own running job
   listen("job-event", (e) => job.running && job.scheduled && onEvent(e));
   listen("job-end", (p) => {

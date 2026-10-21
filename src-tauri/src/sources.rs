@@ -364,6 +364,41 @@ pub fn site_query(source: &str, keyword: &str, area: &str) -> String {
     format!("{site} {} {}", keyword.trim(), area.trim()).trim().to_string()
 }
 
+/// Hits of the source's own search; a failure (not signed in, page changed) is only logged — the web search follows.
+async fn native_hits(source: &str, page: &chromiumoxide::Page, kw: &str, area: &str, limit: usize, token: &CancellationToken, emit: Emit<'_>) -> Vec<crate::websearch::Hit> {
+    let query = format!("{} {}", kw.trim(), area.trim()).trim().to_string();
+    scanner::status(emit, format!("جستجوی مستقیم {} برای «{query}»…", get(source).map_or(source, |s| s.name)));
+    let res = match source {
+        "balad" => crate::balad::search(page, &query, limit, token).await,
+        "telegram" => crate::telegram::search(page, &query, token).await,
+        "instagram" => crate::instagram::search(page, &query, token).await,
+        _ => return vec![],
+    };
+    match res {
+        Ok(h) => {
+            if !h.is_empty() {
+                scanner::log(emit, "info", format!("جستجوی مستقیم: {} نتیجه", h.len()));
+            }
+            h
+        }
+        Err(e) => {
+            scanner::log(emit, "info", e);
+            vec![]
+        }
+    }
+}
+
+/// `own` first, then the web hits it does not already have (same address, ignoring the query string).
+pub fn merge_hits(mut own: Vec<crate::websearch::Hit>, web: Vec<crate::websearch::Hit>) -> Vec<crate::websearch::Hit> {
+    let norm = |u: &str| u.split(['?', '#']).next().unwrap_or("").trim_end_matches('/').to_lowercase();
+    for h in web {
+        if !own.iter().any(|o| norm(&o.url) == norm(&h.url)) {
+            own.push(h);
+        }
+    }
+    own
+}
+
 pub async fn run_search(db: &Db, s: &Settings, profile: &Path, req: &ScanRequest, token: &CancellationToken, emit: Emit<'_>) -> Res<Summary> {
     let source = req.source.as_str();
     let keywords: Vec<String> = req.keywords.iter().map(|k| k.trim().to_string()).filter(|k| !k.is_empty()).collect();
@@ -435,8 +470,20 @@ pub async fn run_search(db: &Db, s: &Settings, profile: &Path, req: &ScanRequest
         let query = site_query(source, kw, area);
         scanner::status(emit, format!("جستجوی «{query}»…"));
         let pages = ((limit as usize).div_ceil(10) + 1).min(10);
-        let hits = match crate::websearch::search_attended(&eng.list, s, profile, &query, pages, token, emit).await {
-            Ok(h) => h,
+        // the source's own search first (Balad; Telegram and Instagram with the user's saved sign-in), then the
+        // web search for what is still missing: both lists are merged
+        let own = native_hits(source, &eng.list, kw, area, limit as usize, token, emit).await;
+        let web = if own.len() >= limit as usize {
+            Ok(vec![])
+        } else {
+            crate::websearch::search_attended(&eng.list, s, profile, &query, pages, token, emit).await
+        };
+        let hits = match web {
+            Ok(w) => merge_hits(own, w),
+            Err(e) if !own.is_empty() => {
+                scanner::log(emit, "warning", format!("جستجوی وب: {e}"));
+                own
+            }
             Err(e) => {
                 let _ = db.run_finish(run_id, 0, 0, "failed", &e);
                 failure = Some(e);
@@ -557,6 +604,13 @@ pub fn public_sql_list() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn own_hits_come_first_and_web_hits_do_not_repeat() {
+        let h = |u: &str| crate::websearch::Hit { url: u.into(), title: String::new(), snippet: String::new() };
+        let m = merge_hits(vec![h("https://t.me/a_channel"), h("https://t.me/b_channel")], vec![h("https://t.me/b_channel/"), h("https://t.me/c_channel?x=1"), h("https://t.me/a_channel#f")]);
+        assert_eq!(m.iter().map(|x| x.url.as_str()).collect::<Vec<_>>(), ["https://t.me/a_channel", "https://t.me/b_channel", "https://t.me/c_channel?x=1"]);
+    }
 
     #[test]
     fn registry_is_sane() {

@@ -1354,6 +1354,126 @@ pub struct Report {
     pub web: Vec<crate::web::WebResult>,
     /// B2B suppliers found for this product (wholesale / B2B mode).
     pub suppliers: Vec<crate::web::Supplier>,
+    /// How many offers the search found before the stored list was cut by `slim` (0 = not cut).
+    pub offers_total: usize,
+    /// Is this a market worth entering? (see `calc_opportunity`)
+    pub opportunity: Opportunity,
+}
+
+/// «امتیاز فرصت» of a market: 0–100 from four signals, each 0–1 and shown to the seller with its reason.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Opportunity {
+    pub score: u8,
+    /// golden (≥70) | good (≥50) | fair (≥30) | weak
+    pub level: String,
+    /// Demand: sales and reviews. Higher = more buyers.
+    pub demand: f64,
+    /// Few sellers for the number of buyers. Higher = less crowded.
+    pub low_competition: f64,
+    /// The sold products are rated poorly (< 3.8). Higher = a better product can win.
+    pub quality_gap: f64,
+    /// Wide price band between the cheap and the dear quarter. Higher = room to position.
+    pub spread: f64,
+    pub reasons: Vec<String>,
+    /// Positions in `offers` of the products that sell yet are poorly rated.
+    pub gold: Vec<usize>,
+}
+
+/// Weights of the four signals (sum 100).
+const OPP_W: [f64; 4] = [35.0, 25.0, 20.0, 20.0];
+/// A rating under this is a quality gap.
+const WEAK_RATING: f64 = 3.8;
+
+fn demand_signal(o: &Offer) -> i64 {
+    o.reviews.max(0) + 3 * o.sales.max(0)
+}
+
+/// How good it is to enter this market: demand, low competition, quality gap and price spread (pure).
+pub fn calc_opportunity(offers: &[Offer], st: &Stats) -> Opportunity {
+    let priced = offers.iter().filter(|o| o.price > 0).count();
+    if priced < 3 {
+        return Opportunity { level: "weak".into(), reasons: vec!["نتیجه کافی برای سنجش فرصت پیدا نشد.".into()], ..Default::default() };
+    }
+    let fa = crate::logic::fa_num;
+    let signal: i64 = offers.iter().map(demand_signal).sum();
+    let demand = ((1.0 + signal as f64).ln() / 5001f64.ln()).min(1.0);
+    let mut sellers: Vec<String> = offers.iter().map(|o| o.seller.trim().to_lowercase()).filter(|s| !s.is_empty()).collect();
+    sellers.sort();
+    sellers.dedup();
+    let low_competition = 1.0 - (sellers.len() as f64 / 30.0).min(1.0);
+    // reviews-weighted rating of the rated offers; too few ratings = neutral
+    let rated: Vec<(f64, f64)> = offers.iter().filter_map(|o| o.rating.filter(|r| *r > 0.0).map(|r| (r, 1.0 + o.reviews.max(0) as f64))).collect();
+    let avg = (rated.len() >= 3).then(|| rated.iter().map(|(r, w)| r * w).sum::<f64>() / rated.iter().map(|x| x.1).sum::<f64>());
+    let quality_gap = avg.map_or(0.3, |a| ((4.3 - a) / 1.3).clamp(0.0, 1.0));
+    let spread_ratio = if st.median > 0 { (st.p75 - st.p25) as f64 / st.median as f64 } else { 0.0 };
+    let spread = (spread_ratio / 0.6).clamp(0.0, 1.0);
+    let score = (demand * OPP_W[0] + low_competition * OPP_W[1] + quality_gap * OPP_W[2] + spread * OPP_W[3]).round().clamp(0.0, 100.0) as u8;
+    let level = match score {
+        70..=100 => "golden",
+        50..=69 => "good",
+        30..=49 => "fair",
+        _ => "weak",
+    };
+    let mut reasons = vec![];
+    reasons.push(match demand {
+        d if d >= 0.7 => format!("تقاضا بالاست: {} فروش و نظر ثبت شده.", fa(signal as f64)),
+        d if d >= 0.4 => format!("تقاضای متوسط ({} فروش و نظر).", fa(signal as f64)),
+        _ => "تقاضای ثبت‌شده کم است؛ مطمئن شوید خریدار دارد.".into(),
+    });
+    reasons.push(match low_competition {
+        c if c >= 0.6 => format!("رقابت کم: فقط {} فروشنده.", fa(sellers.len() as f64)),
+        c if c >= 0.3 => format!("رقابت متوسط: {} فروشنده.", fa(sellers.len() as f64)),
+        _ => format!("بازار شلوغ است: {} فروشنده.", fa(sellers.len() as f64)),
+    });
+    reasons.push(match avg {
+        Some(a) if a < WEAK_RATING => format!("رضایت پایین (میانگین امتیاز {}): محصول بهتر می‌تواند سهم بگیرد.", fa((a * 10.0).round() / 10.0)),
+        Some(a) => format!("رضایت خریداران خوب است (امتیاز {}).", fa((a * 10.0).round() / 10.0)),
+        None => "امتیاز کافی برای سنجش رضایت نیست.".into(),
+    });
+    reasons.push(if spread >= 0.6 { "بازه قیمت پهن است؛ برای جایگاه‌یابی (اقتصادی یا پریمیوم) جا دارید.".into() } else { "بازه قیمت فشرده است؛ رقابت روی قیمت سخت است.".into() });
+    // products that sell yet disappoint: the top demand quartile with a weak rating
+    let mut pos: Vec<i64> = offers.iter().map(demand_signal).filter(|s| *s > 0).collect();
+    pos.sort_unstable();
+    let bar = pct(&pos, 0.6).max(20);
+    let gold = offers
+        .iter()
+        .enumerate()
+        .filter(|(_, o)| demand_signal(o) >= bar && o.reviews >= 5 && o.rating.is_some_and(|r| r > 0.0 && r < WEAK_RATING))
+        .map(|(i, _)| i)
+        .collect();
+    Opportunity {
+        score,
+        level: level.into(),
+        demand: (demand * 100.0).round() / 100.0,
+        low_competition: (low_competition * 100.0).round() / 100.0,
+        quality_gap: (quality_gap * 100.0).round() / 100.0,
+        spread: (spread * 100.0).round() / 100.0,
+        reasons,
+        gold,
+    }
+}
+
+/// Offers kept in a stored report, and in one older than `PRUNE_DAYS`.
+pub const KEEP_OFFERS: usize = 100;
+pub const KEEP_OLD_OFFERS: usize = 20;
+pub const PRUNE_DAYS: i64 = 45;
+
+/// Cuts the heavy offer list of a report to its `keep` best (it is sorted by value score). Everything
+/// the trend, the brand shares, the channels and the price index rest on (`stats`, `brands`, `channels`,
+/// `tiers`, `history`, `srp`) is kept as it is, so the price history never changes. Returns whether
+/// anything was cut. Idempotent.
+pub fn slim(r: &mut Report, keep: usize) -> bool {
+    if r.offers.len() <= keep {
+        return false;
+    }
+    if r.offers_total == 0 {
+        r.offers_total = r.offers.len();
+    }
+    r.offers.truncate(keep);
+    r.groups = crate::identity::group(&r.offers); // group members are indexes into `offers`
+    r.opportunity.gold.retain(|&i| i < keep);
+    true
 }
 
 pub(crate) fn pct(sorted: &[i64], p: f64) -> i64 {
@@ -1661,8 +1781,10 @@ pub fn analyze_opts(query: &str, brand_filter: &str, mut offers: Vec<Offer>, tar
     }
     brand_list.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| collate(&a.name).cmp(&collate(&b.name))));
     let groups = crate::identity::group(&offers);
+    let opportunity = calc_opportunity(&offers, &stats);
 
     Report {
+        opportunity,
         query: query.trim().into(),
         brand: brand_filter.trim().into(),
         target_margin,
@@ -2267,6 +2389,53 @@ pub async fn search(db: &Db, s: &Settings, profile: &Path, req: &MarketReq, toke
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn opportunity_rewards_demand_few_sellers_and_a_quality_gap() {
+        let st = |m: i64| Stats { median: m, p25: m * 8 / 10, p75: m * 12 / 10, ..Default::default() };
+        // few sellers, many sales, poor ratings, wide band → golden
+        let hot: Vec<Offer> = (0..8)
+            .map(|i| Offer { sales: 900, reviews: 120 + i, rating: Some(3.2), price: 100_000 + i * 10_000, seller: format!("s{}", i % 3), ..Default::default() })
+            .collect();
+        let wide = Stats { median: 130_000, p25: 100_000, p75: 170_000, ..Default::default() };
+        let o = calc_opportunity(&hot, &wide);
+        assert_eq!(o.level, "golden", "{o:?}");
+        assert!(o.score >= 70 && o.gold == vec![4, 5, 6, 7] && o.reasons.len() == 4, "{o:?}");
+        // crowded, loved, tight band, no sales → weak
+        let cold: Vec<Offer> = (0..40)
+            .map(|i| Offer { sales: 0, reviews: 1, rating: Some(4.8), price: 100_000 + i, seller: format!("s{i}"), ..Default::default() })
+            .collect();
+        let c = calc_opportunity(&cold, &st(100_000));
+        assert!(c.score < 30 && c.level == "weak" && c.gold.is_empty(), "{c:?}");
+        assert!(c.score < o.score);
+        // too little data is not a verdict
+        assert_eq!(calc_opportunity(&hot[..2], &wide).score, 0);
+        // a slimmed report keeps only gold positions that still exist
+        let mut r = Report { offers: hot, opportunity: o, ..Default::default() };
+        slim(&mut r, 3);
+        assert!(r.opportunity.gold.iter().all(|&i| i < 3));
+    }
+
+    #[test]
+    fn slim_keeps_the_numbers_and_the_best_offers() {
+        let mk = |n: usize| -> Vec<Offer> {
+            (0..n)
+                .map(|i| offer(if i % 2 == 0 { "torob" } else { "digikala" }, &format!("عسل گون خوانسار {} گرمی", 500 + i % 7), 400_000 + (i as i64 * 1_000), &format!("فروشنده {i}"), Some(4.5), 10))
+                .collect()
+        };
+        let mut r = super::analyze("عسل", "", mk(160), 25.0);
+        let (median, srp, brands, channels, tiers) = (r.stats.median, r.srp, r.brands.len(), r.channels.len(), r.tiers.len());
+        let n = r.offers.len();
+        assert!(n > 100, "{n}");
+        assert!(super::slim(&mut r, super::KEEP_OFFERS));
+        assert_eq!((r.offers.len(), r.offers_total), (100, n));
+        assert!(r.groups.iter().all(|g| g.offers.iter().all(|&i| i < 100)), "group members still point at kept offers");
+        assert_eq!((r.stats.median, r.srp, r.brands.len(), r.channels.len(), r.tiers.len()), (median, srp, brands, channels, tiers));
+        // idempotent, and the original total survives a second, harder cut
+        assert!(!super::slim(&mut r, super::KEEP_OFFERS));
+        assert!(super::slim(&mut r, super::KEEP_OLD_OFFERS));
+        assert_eq!((r.offers.len(), r.offers_total), (20, n));
+    }
+
     #[test]
     fn smart_matching() {
         use super::{matches, mine_brands, words, Offer};

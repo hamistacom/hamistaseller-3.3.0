@@ -1,7 +1,7 @@
 // «دریافت لیست محصول»: every product (photo, name, price, link, seller, brand, rating, date …) of
 // a shop link — a Basalam booth (that booth only), a whole site (its home page), one category page or
 // a public Telegram channel — with a short analysis and an Excel file.
-import { h, icon, invoke, fa, clear, safe, input, field, toast, newChannel, skipWaitButton, select, toggle } from "../core.js";
+import { h, icon, invoke, fa, clear, safe, input, field, toast, newChannel, skipWaitButton, select, toggle, vtable } from "../core.js";
 
 const toman = (n) => (n > 0 ? `${fa(n)} تومان` : "—");
 const remember = (k, v) => {
@@ -99,11 +99,20 @@ export async function render(root, params = {}) {
     invoke("reveal", { path }).catch(() => {});
   };
 
+  /** Exports and «افزودن به کالاهای من» work on the ticked products, or on every product when none is ticked. */
+  const chosen = (r, picked) => (picked.size ? r.items.filter((it) => picked.has(it)) : r.items);
+  const saveFile = async (cmd, items, okMsg) => {
+    const path = await safe(invoke(cmd, { items }));
+    if (!path) return;
+    toast(okMsg, "ok");
+    invoke("reveal", { path }).catch(() => {});
+  };
+
   function show(r) {
     current = r;
     const st = r.stats || {};
     let sort = "default";
-    const table = h("div", { class: "table-wrap" });
+    const picked = new Set();
     const sorted = () => {
       const list = [...r.items];
       if (sort === "cheap") list.sort((a, b) => (a.price || Infinity) - (b.price || Infinity));
@@ -111,50 +120,69 @@ export async function render(root, params = {}) {
       if (sort === "newest") list.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
       return list;
     };
-    const drawTable = () =>
-      clear(
-        table,
+    const headCb = h("input", { type: "checkbox", "aria-label": "انتخاب همه" });
+    const count = h("span", { class: "small muted" });
+    const drawCount = () => {
+      count.textContent = picked.size ? `${fa(picked.size)} محصول انتخاب شد` : "برای خروجی، محصول‌ها را تیک بزنید (بدون تیک = همه)";
+      headCb.checked = picked.size > 0 && picked.size === r.items.length;
+      headCb.indeterminate = picked.size > 0 && picked.size < r.items.length;
+    };
+    const rowOf = (it) => {
+      const pic = it.image ? h("img", { src: it.image, alt: "", loading: "lazy", class: "pl-pic" }) : h("span", { class: "pl-pic" });
+      if (it.image) pic.addEventListener("error", () => (pic.hidden = true));
+      const open = (u) => () => safe(invoke("open_url", { url: u }));
+      const cb = h("input", { type: "checkbox", checked: picked.has(it), "aria-label": "انتخاب محصول" });
+      cb.addEventListener("change", () => {
+        cb.checked ? picked.add(it) : picked.delete(it);
+        drawCount();
+      });
+      return h(
+        "tr",
+        {},
+        h("td", {}, cb),
+        h("td", {}, pic),
         h(
-          "table",
-          { class: "t" },
-          h("thead", {}, h("tr", {}, ["", "محصول", "قیمت", "فروشنده / غرفه", "جزئیات", "تاریخ"].map((t) => h("th", {}, t)))),
+          "td",
+          {},
           h(
-            "tbody",
-            {},
-            sorted().map((it) => {
-              const pic = it.image ? h("img", { src: it.image, alt: "", loading: "lazy", class: "pl-pic" }) : h("span", { class: "pl-pic" });
-              if (it.image) pic.addEventListener("error", () => (pic.hidden = true));
-              const open = (u) => () => safe(invoke("open_url", { url: u }));
-              return h(
-                "tr",
-                {},
-                h("td", {}, pic),
-                h(
-                  "td",
-                  {},
-                  h(
-                    "div",
-                    { class: "name-cell" },
-                    h("button", { class: "link n", type: "button", title: it.url, onclick: open(it.url), "data-no-tr": "" }, it.title),
-                    it.link ? h("button", { class: "link small c", type: "button", onclick: open(it.link) }, icon("external", "sm"), "لینک محصول در سایت") : null,
-                  ),
-                ),
-                h("td", { class: "nowrap" }, toman(it.price)),
-                h("td", {}, it.sellerUrl ? h("button", { class: "link small", type: "button", onclick: open(it.sellerUrl), "data-no-tr": "" }, it.seller || "مشاهده") : h("span", { "data-no-tr": "" }, it.seller || "—")),
-                h(
-                  "td",
-                  { class: "small muted" },
-                  [it.brand && `برند: ${it.brand}`, it.rating && `امتیاز ${fa(it.rating)}`, it.reviews && `${fa(it.reviews)} نظر`, it.sales && `${fa(it.sales)} فروش`, it.views && `${fa(it.views)} بازدید`, it.availability, it.location]
-                    .filter(Boolean)
-                    .join(" · ") || "—",
-                ),
-                h("td", { class: "small nowrap" }, it.date ? it.date.slice(0, 10) : "—"),
-              );
-            }),
+            "div",
+            { class: "name-cell" },
+            h("button", { class: "link n", type: "button", title: it.url, onclick: open(it.url), "data-no-tr": "" }, it.title),
+            it.link ? h("button", { class: "link small c", type: "button", onclick: open(it.link) }, icon("external", "sm"), "لینک محصول در سایت") : null,
           ),
         ),
+        h("td", { class: "nowrap" }, toman(it.price)),
+        h("td", {}, it.sellerUrl ? h("button", { class: "link small", type: "button", onclick: open(it.sellerUrl), "data-no-tr": "" }, it.seller || "مشاهده") : h("span", { "data-no-tr": "" }, it.seller || "—")),
+        h(
+          "td",
+          { class: "small muted" },
+          [it.brand && `برند: ${it.brand}`, it.rating && `امتیاز ${fa(it.rating)}`, it.reviews && `${fa(it.reviews)} نظر`, it.sales && `${fa(it.sales)} فروش`, it.views && `${fa(it.views)} بازدید`, it.availability, it.location]
+            .filter(Boolean)
+            .join(" · ") || "—",
+        ),
+        h("td", { class: "small nowrap" }, it.date ? it.date.slice(0, 10) : "—"),
       );
-    drawTable();
+    };
+    headCb.addEventListener("change", () => {
+      picked.clear();
+      if (headCb.checked) r.items.forEach((it) => picked.add(it));
+      vt.repaint();
+      drawCount();
+    });
+    const vt = vtable({
+      head: h("thead", {}, h("tr", {}, h("th", { class: "w-check" }, headCb), ...["", "محصول", "قیمت", "فروشنده / غرفه", "جزئیات", "تاریخ"].map((t) => h("th", {}, t)))),
+      rows: sorted(),
+      row: rowOf,
+      rowHeight: 62,
+    });
+    const table = vt.el;
+    drawCount();
+    const addToCatalog = async () => {
+      const items = chosen(r, picked);
+      const rep = await safe(invoke("catalog_add", { items }));
+      if (!rep) return;
+      toast(`${fa(rep.added)} کالا به «کالاهای من» اضافه شد${rep.updated ? ` و ${fa(rep.updated)} کالا به‌روز شد` : ""}.`, "ok");
+    };
     const sortSel = select(
       [
         ["default", "ترتیب سایت"],
@@ -163,7 +191,7 @@ export async function render(root, params = {}) {
         ["newest", "جدیدترین"],
       ],
       sort,
-      { class: "input", onchange: (e) => { sort = e.target.value; drawTable(); } },
+      { class: "input", onchange: (e) => { sort = e.target.value; vt.setRows(sorted()); } },
     );
     const stat = (v, l) => h("div", { class: "stat" }, h("b", {}, v), h("span", {}, l));
     clear(
@@ -186,7 +214,19 @@ export async function render(root, params = {}) {
         st.sellers?.length > 1 ? h("p", { class: "small" }, h("b", {}, "فروشندگان پرتکرار: "), st.sellers.slice(0, 6).map(([n, c]) => `${n} (${fa(c)})`).join("، ")) : null,
         st.brands?.length ? h("p", { class: "small" }, h("b", {}, "برندها: "), st.brands.slice(0, 6).map(([n, c]) => `${n} (${fa(c)})`).join("، ")) : null,
         r.notes?.length ? h("div", { class: "small muted" }, r.notes.map((n) => h("div", {}, n))) : null,
-        h("div", { class: "row between wrap" }, h("span", { class: "small muted" }, `${fa(r.pages)} صفحه خوانده شد`), h("div", { class: "row" }, sortSel, h("button", { class: "btn primary", type: "button", onclick: exportXlsx }, icon("download", "sm"), "خروجی اکسل"))),
+        h("div", { class: "row between wrap" }, h("span", { class: "small muted" }, `${fa(r.pages)} صفحه خوانده شد`), h("div", { class: "row wrap" }, sortSel, h("button", { class: "btn primary", type: "button", onclick: exportXlsx }, icon("download", "sm"), "خروجی اکسل"))),
+        h(
+          "div",
+          { class: "row between wrap" },
+          count,
+          h(
+            "div",
+            { class: "row wrap" },
+            h("button", { class: "btn sm", type: "button", title: "فایل CSV برای «درون‌ریزی محصولات» ووکامرس (قیمت به تومان)", onclick: () => saveFile("export_woocommerce_csv", chosen(r, picked), "فایل ووکامرس ذخیره شد.") }, icon("download", "sm"), "خروجی ووکامرس (CSV)"),
+            h("button", { class: "btn sm", type: "button", title: "فایل اکسل برای بارگذاری گروهی محصولات در پنل باسلام", onclick: () => saveFile("export_basalam_xlsx", chosen(r, picked), "فایل باسلام ذخیره شد.") }, icon("download", "sm"), "خروجی باسلام (Excel)"),
+            h("button", { class: "btn sm tonal", type: "button", onclick: addToCatalog }, icon("plus", "sm"), "افزودن به کالاهای من"),
+          ),
+        ),
       ),
       h("div", { class: "card flush" }, table),
     );

@@ -569,14 +569,17 @@ pub fn market_of(name: &str, category: &str, runs: &[Report]) -> Market {
     let mut prices = vec![];
     let (mut rsum, mut rn) = (0.0f64, 0.0f64);
     for r in &runs {
-        total += r.offers.len();
+        // a stored report may hold only its best offers (`market::slim`): the full counts are kept
+        total += r.offers.len().max(r.offers_total);
         let basis = |o: &crate::market::Offer| if r.stats.basis == "per_kg" { o.unit_price.unwrap_or(0) } else { o.price };
         let ours: Vec<_> = r
             .offers
             .iter()
             .filter(|o| words(&o.brand).join(" ") == key || words(&o.title).join(" ").contains(&key))
             .collect();
-        mine += ours.len();
+        let kept = ours.len();
+        let counted = if r.offers_total > r.offers.len() { r.brands.iter().find(|b| words(&b.name).join(" ") == key).map_or(0, |b| b.count) } else { 0 };
+        mine += kept.max(counted);
         for o in &ours {
             if !m.platforms.contains(&o.platform) {
                 m.platforms.push(o.platform.clone());

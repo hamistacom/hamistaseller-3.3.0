@@ -25,9 +25,9 @@ Tauri 2 (Rust)  ──invoke/Channel──  UI (vanilla ES modules, RTL, بدو�
 | `commands.rs` | همه دستورهای قابل فراخوانی از UI. کارهای طولانی با «مدیر عملیات» (`jobs.rs`) اجرا می‌شوند: `run_job` کار را در `scanner::JOB_ID` می‌پیچد، پنیک را مهار می‌کند و با نتیجه می‌بندد. کمک‌تابع `tee` رویدادها را هم به وضعیت کار و هم به صفحه می‌فرستد |
 | `jobs.rs` | **مدیر عملیات**: هر کار یک `Job` با شناسه، وضعیت (`running`/`waiting_for_user`/`cancelling`/`completed`/`partial`/…)، پیشرفت و `توقف` مستقل. چند کار هم‌زمان (`MAX_JOBS`)، کارهای حساس (`scan`/`campaign`/`watch`/`catalog`) تک‌نمونه. تغییر هر کار با رویداد `job-update` به UI می‌رود. تابع خالص، با تست `lifecycle` |
 | `links.rs` | **لینک سطح‌موجودیت**: از داده هر پلتفرم لینک «همان کالا» و «همان فروشنده» را می‌سازد (`from_json`)، لینک را پاک و مطلق می‌کند (`canonical`)، نوع آن را می‌شناسد (`kind`) و تأیید می‌کند (`check` → `exact`/`unverified`). هرگز لینک حدسی تولید نمی‌شود |
-| `products.rs` | **دریافت لیست محصول**: `scope_of` محدوده را از لینک می‌سازد (`Booth` = فقط غرفه باسلام، `Site{whole}` = کل سایت یا یک صفحه، `Sites` = چند فروشگاه برای منبع وب، `Telegram` = پست‌های کانال) و `Scope::keeps` هر محصول بیرون از آن را دور می‌اندازد. `crawl` با مرورگر برنامه و خواننده‌های موتور قیمت (`market::PAGE_JS` + `offers_in`) صفحه‌ها را می‌خواند، صفحه بعدی و (برای کل سایت) دسته‌ها را دنبال می‌کند و کپچا را با پنجره قابل رد کردن می‌گذراند. `telegram_posts` پست‌های `t.me/s/<name>` را می‌خواند و `price_from_text` قیمت نوشته‌شده را. `stats` و `export_xlsx` خلاصه و اکسل. تست واحد + تست مرورگر واقعی در `tests-harness/tests/products.rs` |
+| `products.rs` | **دریافت لیست محصول**: `scope_of` محدوده را از لینک می‌سازد (`Booth` = فقط غرفه باسلام، `Site{whole}` = کل سایت یا یک صفحه، `Sites` = چند فروشگاه برای منبع وب، `Telegram` = پست‌های کانال) و `Scope::keeps` هر محصول بیرون از آن را دور می‌اندازد. `crawl` با مرورگر برنامه و خواننده‌های موتور قیمت (`market::PAGE_JS` + `offers_in`) صفحه‌ها را می‌خواند، صفحه بعدی و (برای کل سایت) دسته‌ها را دنبال می‌کند و کپچا را با پنجره قابل رد کردن می‌گذراند. `telegram_posts` پست‌های `t.me/s/<name>` را می‌خواند و `price_from_text` قیمت نوشته‌شده را. `stats` و `export_xlsx` خلاصه و اکسل؛ `woocommerce_csv` (BOM، سلول با پیشوند امن در برابر فرمول `csv_cell`) و `export_basalam_xlsx` برای فروشگاه‌ساز. تست واحد + تست مرورگر واقعی در `tests-harness/tests/products.rs` |
 | `web.rs` | **منابع وب و B2B**: تا ۳ نتیجه ارگانیک مرتبط، هر کدام با خواندن داده ساخت‌یافته صفحه (`parse_product`: JSON-LD → OpenGraph → meta)؛ طبقه‌بندی کیفیت منبع و تشخیص تأمین‌کننده (`classify_supplier`: تولیدکننده/عمده‌فروش/پخش/واردکننده/نمایندگی/خرده‌فروش) با سیگنال‌های واقعی؛ تولید متن استعلام (`rfq_text`). پارسرهای خالص با تست |
-| `db.rs` | اسکیمای SQLite و مهاجرت‌ها (`SCHEMA_VERSION = 12`)، همه کوئری‌ها |
+| `db.rs` | اسکیمای SQLite و مهاجرت‌ها (`SCHEMA_VERSION = 13`)، همه کوئری‌ها |
 | `scanner.rs` | موتور استخراج: راه‌اندازی مرورگر (`Engine`, `launch`, `launch_in`)، ساخت کوئری از شهر/منطقه، `PLACE_JS` |
 | `logic.rs` | نرمال‌سازی شماره‌ها و تماس‌ها، `clean_address`، `city_in`، `photo_url` |
 | `enrich.rs` | تکمیل از سایت کسب‌وکار، `image_data_url` |
@@ -38,7 +38,12 @@ Tauri 2 (Rust)  ──invoke/Channel──  UI (vanilla ES modules, RTL, بدو�
 | `brand.rs` | **تحلیل برند**: ممیزی سایت، اینستاگرام عمومی، امتیازدهی چهارستونه |
 | `strategy.rs` | **استراتژی و بیزینس پلن**: `build(brand, inputs)` آفلاین و قطعی؛ کتابچه هر حوزه (`SECTORS`: بخش مشتری، کانال، شریک، منابع، مجوز، فصل، محتوا، وزن تبلیغات، کهن‌الگو) + داده تحلیل برند → بوم ۹ بخشی، مدل کسب‌وکار، بیزینس پلن، برندینگ، `ad_mix` (سهم‌ها جمعاً ۱۰۰)، نقشه راه ۴ مرحله‌ای، `finance` (کارمزد کانال ۸٪، سربه‌سر، پیش‌بینی ۱۲ ماهه محدود به ظرفیت) و `prompt` برای دستیار هوش مصنوعی. فرمان `brand_strategy` پاسخ‌ها را در `brands.plan` ذخیره می‌کند. UI: `ui/js/pages/strategy.js` |
 | `assist.rs` | دستیار گفتگو: پنجره وب پیام‌رسان با نشست جدا برای هر اپ (`home`, `reset`) |
-| `outreach.rs`, `channels.rs` | کمپین پیامکی (فقط SMS) |
+| `outreach.rs`, `channels.rs` | کمپین پیامکی؛ `channels::load` فقط حساب `sms` را می‌پذیرد (ایمیل/بله/ایتا/روبیکا برداشته شده‌اند) |
+| `alerts.rs` | هشدار به مالک: ربات تلگرام (`alert_*` در kv، توکن با `secrets::seal_str`، خطا با `without_url`) یا پنل پیامک؛ فقط ارسال بیرونی، بدون وب‌هوک ورودی. `should_notify(prev, now)` = از دست رفتن، یا پس‌گرفتن بعد از آن |
+| `fees.rs` | گروه کالا از کلمات عنوان (`group_of`، تطبیق کلمه کامل `has_word`)، جدول کارمزد تخمینی هر پلتفرم، `calc_marketplace_profit`/`compare`، `price_for_margin` (کف قیمت) |
+| `buybox.rs` | `buybox(offers, &Mine)` → برنده، وضعیت `won/lost/not_listed`، قیمت پیشنهادی `undercut` (هرگز زیر کف سود)، هشدار «رقابت زیان‌ده» |
+| `fx.rs` | جدول `fx_rates`، `parse` منبع نرخ (tgju)، `refresh` (تلاش مجدد ۶ ساعته)، `adjust` سه‌حالته؛ بدون تاریخچه ساختگی |
+| `crm.rs` | `place_log_add/place_logs/follow_up_set/follow_ups_due/follow_ups_to_notify` (روی `Db`)؛ حلقه ۱۵ دقیقه‌ای در `background::follow_ups` + افزونه `tauri-plugin-notification` (مجوز `notification:default`) |
 | `schedule.rs`, `background.rs` | زمان‌بندی و اجرای پس‌زمینه |
 | `license.rs`, `admin.rs`, `cloud.rs` | لایسنس آفلاین Ed25519، پنل مدیر، اتصال اختیاری به سرور |
 | `export.rs` | خروجی Excel/CSV/vCard |
@@ -51,8 +56,8 @@ Tauri 2 (Rust)  ──invoke/Channel──  UI (vanilla ES modules, RTL, بدو�
   - `brands(id, name, own, website, instagram, category, note, report JSON, analyzed_at, created_at)`: فقط یک برند می‌تواند `own=1` باشد.
 - v9: `brand_runs(id, brand_id, name, overall, report, created_at)`: هر تحلیل برند برای تاریخچه.
 - v10: جدول‌های `watch` و `catalog`.
-- نسخه فعلی پایگاه داده ۱۲ است (`SCHEMA_V11`: ستون `brands.store` برای فروشگاه خود برند؛ `SCHEMA_V12`: ستون `brands.plan` = JSON پاسخ‌های «استراتژی و بیزینس پلن»).
-- مهاجرت جدید: `SCHEMA_V13` بنویسید، در `migrate` اضافه کنید و `SCHEMA_VERSION` را بالا ببرید. هرگز مهاجرت قبلی را عوض نکنید.
+- نسخه فعلی پایگاه داده **۱۳** است (`SCHEMA_V13`: `places.follow_up_at` + ایندکس جزئی، جدول‌های `place_logs` و `fx_rates`، ستون‌های بای‌باکس/هشدار/بهای خرید در `watch` و `catalog`؛ `SCHEMA_V11`: ستون `brands.store` برای فروشگاه خود برند؛ `SCHEMA_V12`: ستون `brands.plan` = JSON پاسخ‌های «استراتژی و بیزینس پلن»). تست مهاجرت v12←v13: `tests-harness/tests/v13.rs`.
+- مهاجرت جدید: `SCHEMA_V14` بنویسید، در `migrate` اضافه کنید و `SCHEMA_VERSION` را بالا ببرید. هرگز مهاجرت قبلی را عوض نکنید.
 
 ## ۴. موتور قیمت‌یابی (`market.rs`)
 
@@ -108,6 +113,15 @@ Tauri 2 (Rust)  ──invoke/Channel──  UI (vanilla ES modules, RTL, بدو�
 - **برند کوچک:** `Brand.store` → `products::run` → `brand::store_of` (عدد) و `store_advice` (قوت/ضعف/اقدام، تابع خالص با تست). محصولات فروشگاه به‌عنوان کالاهای همین برند به `enrich` داده می‌شوند. `BrandReport.undefined` یعنی برند باید تعریف شود.
 - **تلگرام/اینستاگرام:** `logic::mentions_in_text` آیدی‌های `@` را می‌خواند؛ `telegram::audience` کانال و گروه را جدا می‌کند؛ لینک کانال/پیج در `Place.maps_url`. `sources::save` مخاطبی را که فقط آیدی پیام‌رسان (غیر از خود صفحه) دارد هم نگه می‌دارد.
 
+## ۵-د. دور «طلایی» (v13)
+
+- **آواتار:** `enrich::avatar_data_url(dir, url)` تصویر را یک بار در `cache/avatars/<sha256>.<ext>` می‌گذارد و از دیسک می‌دهد؛ `data:image` قدیمی همان‌طور کار می‌کند. `places.photo` فقط آدرس است.
+- **گزارش بازار:** `market::KEEP_OFFERS = 100` برای ذخیره، `KEEP_OLD_OFFERS = 20` و `Db::prune_old_reports` (۴۵ روز، در شروع برنامه). `slim` آمار/روند/سهم‌ها را دست‌نخورده می‌گذارد. `calc_opportunity` → `Report.opportunity` (وزن‌ها ۳۵/۲۵/۲۰/۲۰؛ طلایی = تقاضادار + امتیاز < ۳٫۸ + حداقل ۵ نظر).
+- **جستجوی بومی:** `balad::search`، `telegram::search` (تلگرام وب، نیازمند ورود)، `instagram::search` (از صفحه وارد‌شده)؛ `sources::run_search` نتیجه بومی را با نتیجه وب ادغام (`merge_hits`) می‌کند. قاعده «بدون اشخاص عادی و گروه خصوصی» همچنان در فیلترها هست.
+- **موتور مالی:** `strategy::finance` کارمزد کانال هر حوزه (۵ تا ۱۸٪)، ۱۰٪ مالیات، بسته‌بندی و مرجوعی ۲ تا ۸٪؛ `brandbook` از حوزه و جایگاه قیمت ساخته می‌شود.
+- **UI:** `core.js::vtable({head, cols, rows, row, minRows, rowHeight, tableCls})` جدول پنجره‌ای (ارتفاع با CSSOM)؛ استفاده در `plist.js`، `contacts.js`، محصولات `market.js`. `pages/profit.js` = کارت سود، خط بای‌باکس، پنجره هشدار. پیگیری در `card.js` (`crmSection`) و `dashboard.js` (`dueCard`).
+- **تخمینی بودن:** جدول کارمزد (`fees::usual_rate`) و بای‌باکس برآورد هستند و در UI «تخمینی» نوشته می‌شوند؛ کاربر می‌تواند کارمزد را عوض کند (kv `fee_overrides`).
+
 ## ۶. رابط کاربری (`ui/`)
 
 - `js/modules.js`: فهرست صفحه‌ها با `space` (crm، market، brand) و `SPACES`. صفحه جدید = یک ورودی در `PAGES` + فایل در `js/pages/` با `export async function render(root, ctx)`.
@@ -126,10 +140,11 @@ Tauri 2 (Rust)  ──invoke/Channel──  UI (vanilla ES modules, RTL, بدو�
 
 | دستور | چه چیزی |
 |---|---|
-| `cd tests-harness && cargo test` | تست‌های واحد و موتور (با `HS_TEST_BROWSER=<chrome>` و `--test-threads=1` تست‌های مرورگر واقعی هم اجرا می‌شوند) |
+| `cd src-tauri && cargo test --bin hamista-seller [--features custom-protocol,master\|custom-protocol,issuer]` | تست‌های واحد (۹۷ مورد) برای هر سه نسخه |
+| `cd tests-harness && cargo test` | تست‌های واحد و موتور (از جمله `tests/v13.rs`: مهاجرت، CRM، هرس، FX، ردیابی کالا) (با `HS_TEST_BROWSER=<chrome>` و `--test-threads=1` تست‌های مرورگر واقعی هم اجرا می‌شوند) |
 | `python3 ui-test/flows.py` | سناریوهای کامل رابط کاربری روی `ui-test/mock.js` |
 | `python3 ui-test/render.py` | همه صفحه‌ها در دو تم و دو زبان: خطای JS، سرریز، جا شدن فرم استخراج در ۱۳۶۶×۶۹۰ |
-| `cargo clippy --target x86_64-pc-windows-msvc [--features …]` | بدون هشدار برای هر سه نسخه |
+| `cargo clippy --all-targets --features custom-protocol[,master\|,issuer] -- -D warnings` | بدون هشدار برای هر سه نسخه (روی لینوکس؛ کد مخصوص ویندوز را فقط CI ویندوز بررسی می‌کند. `--target x86_64-pc-windows-msvc` روی لینوکس به `lib.exe` نیاز دارد) |
 
 تست‌های Neshan/Balad `#[ignore]` هستند (به شبکه ایران نیاز دارند).
 
@@ -139,3 +154,5 @@ Tauri 2 (Rust)  ──invoke/Channel──  UI (vanilla ES modules, RTL, بدو�
 - بدون چرخش حساب، اسپینتکس یا هر روش دور زدن ضد اسپم؛ بدون بررسی انبوه ثبت‌نام شماره در پیام‌رسان‌ها؛ بدون افزودن خودکار به گروه.
 - ارسال به ابربانک شفاف و فقط فیلدهای عمومی است (نه یادداشت، وضعیت، برچسب یا مخاطب دستی/واردشده).
 - لیست عدم ارسال و پاسخ «لغو۱۱» همیشه رعایت می‌شود.
+- **تناقض شناخته‌شده:** منبع «دیوار/شیپور» (`divar.rs`، از اصلاحات میدانی مالک) شماره تماس آگهی‌ها را می‌خواند و با مرز اول این بخش نمی‌خواند. هیچ ماژول تازه‌ای نباید این کار را تکرار کند؛ حذف یا محدود کردن آن (مثلاً فقط فروشگاه‌ها و کسب‌وکارها) تصمیم مالک است.
+- **کانال‌های ارسال:** کمپین = فقط پیامک؛ دستیار گفتگو = ارسال دستی؛ `alerts.rs` = فقط به خود مالک (تلگرام/پیامک). به مشتری چیزی از مسیر هشدار فرستاده نمی‌شود و وب‌هوک ورودی وجود ندارد.

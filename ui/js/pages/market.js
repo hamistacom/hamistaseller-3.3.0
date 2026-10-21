@@ -1,7 +1,8 @@
 // «تحلیل محصول»: one product search across Iranian shops and classifieds → market prices, a
 // suggested selling price (seller mode) or the best place to buy (buyer mode), brands, sales
 // channels, related searches, price history and every offer with its photo.
-import { h, icon, invoke, fa, clear, safe, input, field, toast, modal, newChannel, jdate, ago, confirmBox, select, copy, skipWaitButton } from "../core.js";
+import { h, icon, invoke, fa, clear, safe, input, field, toast, modal, newChannel, jdate, ago, confirmBox, select, copy, skipWaitButton, vtable, bar } from "../core.js";
+import { profitCard, trackFields, num } from "./profit.js";
 import { refreshLists, go } from "../state.js";
 import { runJob } from "../jobs.js";
 import { hero, photoCards, productPhoto } from "../photos.js";
@@ -119,6 +120,12 @@ function seg(options, value, onchange, cls = "") {
     );
   draw();
   box.value = () => value;
+  /** Switches tab from code (e.g. «شکار فرصت‌ها» jumps to the products tab). */
+  box.select = (v) => {
+    value = v;
+    draw();
+    onchange(v);
+  };
   return box;
 }
 
@@ -186,7 +193,7 @@ function svg(tag, attrs = {}, ...kids) {
 }
 
 /** Price trend (median and lowest) over earlier searches of the same product. */
-function trend(points) {
+function trend(points, fmt = toman) {
   const W = 1000,
     H = 200,
     L = 10,
@@ -204,7 +211,7 @@ function trend(points) {
     return [
       path,
       ...points.map((p, i) =>
-        svg("circle", { cx: x(i).toFixed(1), cy: y(p[k]).toFixed(1), r: 3.5, class: `pt ${cls}` }, svg("title", {}, `${jdate(p[0])}: ${toman(p[k])}`)),
+        svg("circle", { cx: x(i).toFixed(1), cy: y(p[k]).toFixed(1), r: 3.5, class: `pt ${cls}` }, svg("title", {}, `${jdate(p[0])}: ${fmt(p[k])}`)),
       ),
     ];
   };
@@ -224,6 +231,108 @@ function trend(points) {
       : null,
   );
   return svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "trend-chart", role: "img", "aria-label": "روند قیمت" }, grid, line(1, "md"), line(2, "mn"), labels);
+}
+
+const OPP = { golden: ["فرصت طلایی", "ok"], good: ["فرصت خوب", "info"], fair: ["متوسط", "warn"], weak: ["ضعیف", "bad"] };
+
+/** «امتیاز فرصت» of the market: demand, few sellers, quality gap, price spread — each with its reason. */
+function opportunityCard(o, hunt) {
+  if (!o?.level) return null;
+  const [label, tone] = OPP[o.level] || OPP.weak;
+  const sig = (name, v) => h("div", { class: "opp-sig" }, h("span", { class: "small" }, name), bar(v, v >= 0.6 ? "ok" : v >= 0.3 ? "warn" : ""), h("b", { class: "small" }, fa(Math.round(v * 100))));
+  return h(
+    "div",
+    { class: `card stack opp-card ${o.level}`.trim() },
+    h("div", { class: "card-h" }, h("h2", {}, icon("target", "sm"), "امتیاز فرصت بازار"), h("span", { class: `pill ${tone}` }, label)),
+    h(
+      "div",
+      { class: "opp-grid" },
+      h("div", { class: "opp-score" }, h("b", {}, fa(o.score)), h("span", { class: "small muted" }, "از ۱۰۰")),
+      h("div", { class: "stack tight grow" }, sig("تقاضا", o.demand), sig("رقابت کم", o.lowCompetition), sig("شکاف کیفیت", o.qualityGap), sig("پهنای قیمت", o.spread)),
+    ),
+    h("ul", { class: "opp-why small" }, (o.reasons || []).map((t) => h("li", {}, t))),
+    o.gold?.length
+      ? h("div", { class: "row wrap" }, h("button", { class: "btn tonal", type: "button", onclick: hunt }, icon("sparkle", "sm"), `شکار فرصت‌های طلایی (${fa(o.gold.length)} محصول)`), h("span", { class: "small muted" }, "پرفروش با امتیاز پایین: جای محصول بهتر خالی است"))
+      : null,
+  );
+}
+
+const FX_MODES = [
+  ["toman", "تومان (اسمی)"],
+  ["usd", "تعدیل با دلار"],
+  ["gold", "تعدیل با طلا"],
+];
+
+/** The price trend with a switch: Toman as listed / in dollars / in grams of 18-carat gold, and the real change. */
+function fxTrend(hs) {
+  const box = h("div", { class: "stack" });
+  const info = h("p", { class: "small fx-info" });
+  const chart = h("div");
+  let mode = "toman";
+  let adj = null;
+  const fmt = {
+    toman: (v) => `${toman(v)}`,
+    usd: (v) => `${fa(Math.round(v * 100) / 100)} دلار`,
+    gold: (v) => `${fa(Math.round(v * 1000) / 1000)} گرم طلا`,
+  };
+  const sentence = () => {
+    const nominal = adj?.nominalPct ?? (hs[0][1] ? Math.round(((hs[hs.length - 1][1] - hs[0][1]) / hs[0][1]) * 1000) / 10 : null);
+    const real = mode === "usd" ? adj?.usdPct : mode === "gold" ? adj?.goldPct : nominal;
+    if (mode === "toman") return nominal === null ? "" : `به تومان ${nominal > 0 ? "گران‌تر" : nominal < 0 ? "ارزان‌تر" : "بدون تغییر"}${nominal ? ` شده: ${fa(Math.abs(nominal))}٪` : ""} — این عدد اثر تورم و نرخ ارز را هم دارد.`;
+    if (real === null || real === undefined) return "";
+    const unit = mode === "usd" ? "دلار" : "طلا";
+    const verdict = nominal > 0 && real < 0 ? ` یعنی افزایش قیمت به تومان فقط ریزش پول بوده و کالا در واقع ارزان‌تر شده است.` : nominal < 0 && real > 0 ? " یعنی کاهش قیمت به تومان واقعی نیست و کالا نسبت به ارز گران‌تر شده است." : "";
+    return `قیمت واقعی (به ${unit}) حدود ${fa(Math.abs(real))}٪ ${real > 0 ? "رشد کرده" : real < 0 ? "کاهش یافته" : "تغییری نکرده"} (اسمی: ${fa(nominal ?? 0)}٪).${verdict}`;
+  };
+  const redraw = () => {
+    const vals = adj?.[mode] || [];
+    if (mode !== "toman" && !vals.some((v) => v > 0)) {
+      clear(chart, h("div", { class: "callout compact" }, icon("info", "sm"), h("span", { class: "small" }, `نرخ ${mode === "usd" ? "دلار" : "طلا"} ثبت نشده است. نرخ امروز خودکار گرفته می‌شود؛ اگر اینترنت یا منبع نرخ در دسترس نیست، دستی وارد کنید.`), h("button", { class: "btn sm", type: "button", onclick: () => fxModal(load) }, "ثبت نرخ")));
+      info.textContent = adj?.fetchError || "";
+      return;
+    }
+    const pts = mode === "toman" ? hs : hs.map((p, i) => [p[0], vals[i], vals[i] * ((p[2] || p[1]) / (p[1] || 1))]);
+    clear(chart, trend(pts, fmt[mode]));
+    const sparse = mode !== "toman" && adj && adj.rateDays < 2 ? " فقط یک نرخ ثبت شده؛ خط تعدیل‌شده فعلاً همان خط تومانی با مقیاس دیگر است و با ثبت نرخ روزهای دیگر دقیق می‌شود." : "";
+    info.textContent = `${sentence()}${sparse}${adj?.fetchError ? ` (${adj.fetchError})` : ""}`;
+  };
+  const load = async () => {
+    adj = (await safe(invoke("fx_adjust", { points: hs }))) || adj;
+    redraw();
+  };
+  const sw = seg(FX_MODES.map(([v, l]) => [v, l]), "toman", (v) => {
+    mode = v;
+    if (v !== "toman" && !adj) load();
+    else redraw();
+  }, "fx-seg");
+  redraw();
+  box.append(h("div", { class: "row between wrap" }, sw, h("button", { class: "btn ghost sm", type: "button", onclick: () => fxModal(load) }, icon("edit", "sm"), "ثبت نرخ دلار و طلا")), chart, info);
+  return box;
+}
+
+/** Hand-typed rate of a day (Toman per dollar / per gram of 18-carat gold). */
+function fxModal(done) {
+  const today = new Date().toISOString().slice(0, 10);
+  const date = input({ type: "date", value: today, dir: "ltr" });
+  const usd = input({ inputmode: "numeric", dir: "ltr", placeholder: "مثلاً ۱۰۵٬۰۰۰" });
+  const gold = input({ inputmode: "numeric", dir: "ltr", placeholder: "مثلاً ۶۵۰٬۰۰۰" });
+  modal({
+    title: "نرخ دلار و طلا",
+    sub: "قیمت آزاد به تومان. نرخ هر روزی که ثبت کنید برای تعدیل قیمت‌های همان روز و روزهای بعدش استفاده می‌شود (روز بدون نرخ، نزدیک‌ترین نرخ قبلی را می‌گیرد).",
+    body: [field("تاریخ", date), field("یک دلار آمریکا (تومان)", usd), field("یک گرم طلای ۱۸ عیار (تومان)", gold)],
+    actions: [
+      { label: "انصراف" },
+      {
+        label: "ذخیره",
+        kind: "primary",
+        onClick: async () => {
+          const r = await safe(invoke("fx_rates", { set: { date: date.value, usdToman: num(usd.value), gold18Toman: num(gold.value) } }), "نرخ ذخیره شد");
+          if (!r) return false;
+          done?.();
+        },
+      },
+    ],
+  });
 }
 
 /** One line per source over the dates they were searched: series = [{name, cls, points: [[date, value]]}]. */
@@ -849,6 +958,7 @@ export function report(r, { search, mode = "seller" }) {
     ...(r.web?.length ? [["web", `منابع وب (${fa(r.web.length)})`, "globe"]] : []),
     ["history", "روند قیمت", "history"],
   ];
+  let openGold = null; // set by the products tab
   const body = h("div", { class: "stack" });
   const tabBar = seg(tabs, "summary", (v) => draw(v), "rep-tabs");
   const draw = (t) => clear(body, { summary, products, same, brands, sellers, channels, suppliers, web: webTab, history }[t]());
@@ -860,6 +970,11 @@ export function report(r, { search, mode = "seller" }) {
       { class: "stack" },
       kpis,
       advice,
+      opportunityCard(r.opportunity, () => {
+        tabBar.select("products");
+        openGold?.();
+      }),
+      mode === "buyer" ? null : profitCard({ price: r.srp, cost: r.advice?.buyPrice || 0, category: r.query, title: "سود خالص روی هر کانال فروش" }),
       r.related?.length || r.subcategories?.length
         ? h(
             "div",
@@ -883,7 +998,6 @@ export function report(r, { search, mode = "seller" }) {
   }
 
   function products() {
-    const tbody = h("tbody");
     let pf = "";
     let sort = mode === "buyer" ? "low" : "value";
     let find = "";
@@ -922,21 +1036,24 @@ export function report(r, { search, mode = "seller" }) {
       newest: (x, y) => (y.updated || "").localeCompare(x.updated || ""),
       value: (x, y) => y.value - x.value,
     };
-    function rows() {
-      let list = r.offers.filter(
-        (o) => (!pf || o.platform === pf) && (!find || o.title.includes(find) || (o.seller || "").includes(find) || (o.brand || "").includes(find)),
-      );
-      list = [...list].sort(cmp[sort]);
-      clear(
-        tbody,
-        list.slice(0, 500).map((o, i) => {
+    const goldSet = new Set((r.opportunity?.gold || []).map((i) => r.offers[i]).filter(Boolean));
+    let gold = false;
+    const goldBtn = h(
+      "button",
+      { class: "btn sm tonal gold-btn", type: "button", "aria-pressed": "false", title: "کالاهایی که فروش خوبی دارند ولی رضایت خریدار از آن‌ها پایین است (امتیاز کمتر از ۳٫۸)؛ جای محصول بهتر خالی است", onclick: () => { gold = !gold; goldBtn.classList.toggle("on", gold); goldBtn.setAttribute("aria-pressed", String(gold)); rows(); } },
+      icon("sparkle", "sm"),
+      `شکار فرصت‌های طلایی (${fa(goldSet.size)})`,
+    );
+    goldBtn.hidden = !goldSet.size;
+    openGold = () => { if (!goldSet.size) return; gold = true; goldBtn.classList.add("on"); goldBtn.setAttribute("aria-pressed", "true"); rows(); };
+    const rowOf = (o, i) => {
           const vb = h("i");
           vb.style.width = `${o.value}%`;
           const img = o.image ? h("img", { src: o.image, alt: "", loading: "lazy", decoding: "async", referrerpolicy: "no-referrer" }) : icon("store");
           if (o.image) img.addEventListener("error", () => img.replaceWith(icon("store")));
           return h(
             "tr",
-            {},
+            { class: goldSet.has(o) ? "gold-row" : "" },
             h("td", { class: "rn" }, fa(i + 1)),
             h("td", {}, h("span", { class: "thumb" }, img)),
             h(
@@ -981,8 +1098,20 @@ export function report(r, { search, mode = "seller" }) {
                 : null,
             ),
           );
-        }),
+    };
+    const vt = vtable({
+      head: h("thead", {}, h("tr", {}, ["#", "", "کالا", "کانال / روش خرید", "فروشنده", "امتیاز", "قیمت (تومان)", "هر کیلو", "بروزرسانی", "ارزش خرید", ""].map((t) => h("th", {}, t)))),
+      row: rowOf,
+      rowHeight: 64,
+      cls: "mkt-t-wrap",
+      tableCls: "mkt-t",
+    });
+    function rows() {
+      let list = r.offers.filter(
+        (o) => (!pf || o.platform === pf) && (!gold || goldSet.has(o)) && (!find || o.title.includes(find) || (o.seller || "").includes(find) || (o.brand || "").includes(find)),
       );
+      list = [...list].sort(cmp[sort]);
+      vt.setRows(list);
     }
     rows();
     let sellers = [...new Set(r.offers.map((o) => o.seller).filter((x) => x && !Object.values(PNAME).includes(x)))];
@@ -999,21 +1128,8 @@ export function report(r, { search, mode = "seller" }) {
     return h(
       "div",
       { class: "card flush" },
-      h("div", { class: "card-h pad wrap" }, h("h2", {}, "پیشنهادهای قیمت"), box, fil, srt, seed),
-      h(
-        "div",
-        { class: "table-wrap" },
-        h(
-          "table",
-          { class: "t mkt-t" },
-          h(
-            "thead",
-            {},
-            h("tr", {}, ["#", "", "کالا", "کانال / روش خرید", "فروشنده", "امتیاز", "قیمت (تومان)", "هر کیلو", "بروزرسانی", "ارزش خرید", ""].map((t) => h("th", {}, t))),
-          ),
-          tbody,
-        ),
-      ),
+      h("div", { class: "card-h pad wrap" }, h("h2", {}, "پیشنهادهای قیمت"), box, fil, srt, goldBtn, seed),
+      vt.el,
       h(
         "p",
         { class: "small muted pad" },
@@ -1390,7 +1506,7 @@ export function report(r, { search, mode = "seller" }) {
         { class: "card stack" },
         h("div", { class: "card-h" }, h("h2", {}, "روند قیمت کل بازار"), h("span", { class: "legend" }, h("span", {}, h("i", { class: "m" }), "میانه"), h("span", {}, h("i", { class: "p" }), "کمترین"))),
         hs.length >= 2
-          ? trend(hs)
+          ? fxTrend(hs)
           : h("p", { class: "small muted" }, "هر روز که این کالا تحلیل شود، یک نقطه به روند اضافه می‌شود. با «پایش روزانه» این کار خودکار انجام می‌شود."),
       ),
       chart
@@ -1459,12 +1575,16 @@ export function watchModal(r, query = r.query, brand = r.brand || "") {
   const own = input({ inputmode: "numeric", dir: "ltr", placeholder: "اختیاری" });
   own.addEventListener("blur", () => (own.value = money(own.value) ? fa(money(own.value)) : ""));
   const pct = input({ type: "number", min: 1, max: 100, dir: "ltr", value: 5 });
+  const cost = input({ inputmode: "numeric", dir: "ltr", placeholder: "اختیاری — برای کف سود ریپرایسر" });
+  cost.addEventListener("blur", () => (cost.value = money(cost.value) ? fa(money(cost.value)) : ""));
+  const track = trackFields();
   modal({
     title: "افزودن به پایش روزانه",
     sub: `«${[query, brand].filter(Boolean).join(" — ")}» هر روز در ساعت پایش دوباره تحلیل می‌شود؛ روند قیمت هر منبع خودکار ساخته می‌شود و تغییر مهم هشدار داده می‌شود.`,
     body: [
       field("قیمت فروش شما (تومان)", own, "اگر بدهید، وقتی قیمت شما از میانه بازار بالاتر برود یا از ارزان‌ترین رقیب پایین‌تر باشد خبر می‌دهیم."),
       field("آستانه هشدار (٪)", pct, "تغییر میانه یا کمترین قیمت بیشتر از این درصد، هشدار می‌شود."),
+      h("details", { class: "fold" }, h("summary", {}, "ردیابی بای‌باکس و ریپرایسر (اختیاری)"), h("div", { class: "stack" }, field("بهای خرید (تومان)", cost, "کف سود = بهای خرید + کارمزد + حداقل حاشیه"), track.el)),
     ],
     actions: [
       { label: "انصراف" },
@@ -1474,7 +1594,7 @@ export function watchModal(r, query = r.query, brand = r.brand || "") {
         onClick: async () => {
           const req = { ...(r.req || {}), query, brand };
           const id = await safe(
-            invoke("watch_save", { item: { req, ownPrice: money(own.value), alertPct: Number(pct.value) || 5, enabled: true } }),
+            invoke("watch_save", { item: { req, ownPrice: money(own.value), alertPct: Number(pct.value) || 5, enabled: true, cost: money(cost.value), ...track.value() } }),
             "به پایش روزانه اضافه شد",
           );
           if (id === undefined) return false;

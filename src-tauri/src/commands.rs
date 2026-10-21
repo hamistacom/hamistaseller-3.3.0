@@ -321,6 +321,35 @@ pub async fn product_list_export(app: AppHandle, state: State<'_, AppState>, rep
     Ok(path)
 }
 
+/// The selected products as a WooCommerce import CSV in Downloads/HamistaSeller; returns its path.
+#[tauri::command]
+pub async fn export_woocommerce_csv(app: AppHandle, state: State<'_, AppState>, items: Vec<crate::products::Item>) -> Res<String> {
+    let dir = app.path().download_dir().unwrap_or_else(|_| state.dir.join("exports")).join("HamistaSeller");
+    let path = crate::products::export_woocommerce_csv(&items, &dir)?;
+    state.db.log("export", &format!("{} محصول به CSV ووکامرس", items.len()));
+    Ok(path)
+}
+
+/// The selected products as a Basalam bulk-upload sheet; returns its path.
+#[tauri::command]
+pub async fn export_basalam_xlsx(app: AppHandle, state: State<'_, AppState>, items: Vec<crate::products::Item>) -> Res<String> {
+    let dir = app.path().download_dir().unwrap_or_else(|_| state.dir.join("exports")).join("HamistaSeller");
+    let path = crate::products::export_basalam_xlsx(&items, &dir)?;
+    state.db.log("export", &format!("{} محصول به اکسل باسلام", items.len()));
+    Ok(path)
+}
+
+/// «افزودن به کالاهای من»: the selected products join the seller's catalogue (their price is the shelf price
+/// to compare with the market).
+#[tauri::command]
+pub async fn catalog_add(state: State<'_, AppState>, items: Vec<crate::products::Item>) -> Res<crate::watch::CatalogImport> {
+    let rows = items.into_iter().filter(|i| i.title.trim().chars().count() >= 2).map(|i| (i.title.trim().chars().take(160).collect(), String::new(), i.brand.trim().chars().take(60).collect(), i.price.max(0), 0)).collect::<Vec<_>>();
+    if rows.is_empty() {
+        return Err("محصولی انتخاب نشده است.".into());
+    }
+    crate::watch::upsert(&state.db, rows)
+}
+
 /// Path of the Edge / Chrome the scanner will use (`custom` first), or null.
 #[tauri::command]
 pub async fn browser_detect(custom: String) -> Res<Option<String>> {
@@ -481,6 +510,7 @@ pub async fn brand_analyze(app: AppHandle, state: State<'_, AppState>, id: i64, 
 #[tauri::command]
 pub async fn brand_strategy(state: State<'_, AppState>, id: i64, inputs: crate::strategy::Inputs) -> Res<crate::strategy::Strategy> {
     let b = state.db.brands()?.into_iter().find(|b| b.id == id).ok_or("برند پیدا نشد.")?;
+    let inputs = inputs.sanitized()?;
     state.db.brand_plan_save(id, &inputs)?;
     Ok(crate::strategy::build(&b, &inputs))
 }
@@ -594,14 +624,126 @@ pub async fn catalog_check(state: State<'_, AppState>, ids: Vec<i64>, platforms:
     run_job(None, &state, job, work, summary_outcome).await
 }
 
-/// The business photo for the card, as a data: URL (the UI may only show local images).
+/// Buy-box tracking of a catalogue item: the seller's name / listing link, minimum margin and alert channel.
+#[tauri::command]
+pub async fn catalog_track(state: State<'_, AppState>, id: i64, seller: String, url: String, margin: f64, channel: String) -> Res<()> {
+    crate::watch::track_item(&state.db, id, &seller, &url, margin, &channel)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlertView {
+    #[serde(flatten)]
+    pub config: crate::alerts::Config,
+    /// The SMS panels that can carry an alert: (id, name).
+    pub sms_accounts: Vec<(String, String)>,
+}
+
+/// Alert settings (Telegram bot + SMS), read or saved. `token`: None keeps it, "" removes it.
+#[tauri::command]
+pub async fn alert_config(state: State<'_, AppState>, config: Option<crate::alerts::Config>, token: Option<String>) -> Res<AlertView> {
+    if let Some(c) = config {
+        crate::alerts::save(&state.db, &c, token.as_deref())?;
+    }
+    let sms_accounts = state.db.accounts()?.into_iter().filter(|a| a.kind == "sms").map(|a| (a.id, a.name)).collect();
+    Ok(AlertView {
+        config: crate::alerts::config(&state.db),
+        sms_accounts,
+    })
+}
+
+/// Sends a test message on `channel` so the seller sees the alert reach them.
+#[tauri::command]
+pub async fn alert_test(state: State<'_, AppState>, channel: String) -> Res<()> {
+    if !matches!(channel.as_str(), "telegram" | "sms" | "both") {
+        return Err("کانال هشدار را انتخاب کنید.".into());
+    }
+    crate::alerts::send(&state.db, &channel, "✅ هامیستا سلر: هشدارها به همین‌جا می‌رسند.").await
+}
+
+fn fee_overrides(db: &Db) -> std::collections::HashMap<String, f64> {
+    db.kv_get("fee_overrides").and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default()
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfitView {
+    pub rows: Vec<crate::fees::ProfitOut>,
+    pub group: String,
+}
+
+/// Net profit of one price on every platform (commission, VAT, packaging, floor price). The seller's own
+/// commission rates (kept in `fee_overrides`) beat the usual ones; `set_rates` saves new ones.
+#[tauri::command]
+pub async fn profit_compare(state: State<'_, AppState>, input: crate::fees::ProfitIn, set_rates: Option<std::collections::HashMap<String, f64>>) -> Res<ProfitView> {
+    let mut inp = input;
+    if let Some(r) = set_rates {
+        let ok: std::collections::HashMap<String, f64> = r.into_iter().filter(|(k, v)| v.is_finite() && (0.0..=60.0).contains(v) && crate::fees::platforms().iter().any(|p| p.0 == k)).collect();
+        state.db.kv_set("fee_overrides", &serde_json::to_string(&ok).map_err(crate::db::err)?)?;
+    }
+    let mut merged = fee_overrides(&state.db);
+    merged.extend(inp.overrides.drain());
+    inp.overrides = merged;
+    Ok(ProfitView {
+        group: crate::fees::group_of(&inp.category).into(),
+        rows: crate::fees::compare(&inp),
+    })
+}
+
+/// Stored dollar / gold rates; `set` saves a hand-typed day first.
+#[tauri::command]
+pub async fn fx_rates(state: State<'_, AppState>, set: Option<crate::fx::Rate>) -> Res<Vec<crate::fx::Rate>> {
+    if let Some(r) = set {
+        crate::fx::set(&state.db, &r)?;
+    }
+    crate::fx::list(&state.db, 400)
+}
+
+/// A price history (date, median, min) read in dollars and grams of gold, with the real % change.
+#[tauri::command]
+pub async fn fx_adjust(state: State<'_, AppState>, points: Vec<(String, i64, i64)>) -> Res<crate::fx::Adjusted> {
+    crate::fx::view(&state.db, &points).await
+}
+
+// ---------------- B2B follow-up (CRM) ----------------
+
+#[tauri::command]
+pub async fn place_logs(state: State<'_, AppState>, id: i64) -> Res<Vec<crate::crm::PlaceLog>> {
+    state.db.place_logs(id)
+}
+
+/// Writes one call / message / meeting / deal / note on a business's timeline; `next` sets («…») or clears
+/// (empty) the next follow-up, None leaves it.
+#[tauri::command]
+pub async fn place_log_add(state: State<'_, AppState>, id: i64, kind: String, note: String, next: Option<String>) -> Res<i64> {
+    state.db.place_log_add(id, &kind, &note, next.as_deref())
+}
+
+#[tauri::command]
+pub async fn place_log_delete(state: State<'_, AppState>, id: i64) -> Res<()> {
+    state.db.place_log_delete(id)
+}
+
+#[tauri::command]
+pub async fn follow_up_set(state: State<'_, AppState>, id: i64, at: String) -> Res<()> {
+    state.db.follow_up_set(id, &at)
+}
+
+/// Today's and overdue follow-ups for the dashboard.
+#[tauri::command]
+pub async fn follow_ups_due(state: State<'_, AppState>) -> Res<Vec<crate::crm::Due>> {
+    state.db.follow_ups_due(50)
+}
+
+/// The business photo for the card, as a data: URL (the UI may only show local images). Downloaded once,
+/// then served from `cache/avatars` (the database keeps only its address).
 #[tauri::command]
 pub async fn place_photo(state: State<'_, AppState>, id: i64) -> Res<String> {
     let url = state.db.get(id)?.photo;
     if url.is_empty() {
         return Ok(String::new());
     }
-    crate::enrich::image_data_url(&url).await
+    crate::enrich::avatar_data_url(&state.dir.join("cache").join("avatars"), &url).await
 }
 
 /// A photo of a city for the extraction banner: the lead image of its Persian Wikipedia article, as a

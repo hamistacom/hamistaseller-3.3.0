@@ -156,6 +156,65 @@ with sync_playwright() as pw:
         p.screenshot(path=f"{OUT}/x-market-report-{theme}.png", full_page=True)
         ctx.close()
 
+    # v13 views: both themes and both languages, 1366 and 1100 wide
+    def v13_views(p, tag, lang):
+        def shot(name):
+            overflow_check(p, f"{tag}-{name}")
+            p.screenshot(path=f"{OUT}/v13-{name}-{tag}.png")
+
+        p.goto(f"{BASE}#/market?run=7")
+        p.wait_for_timeout(700)
+        shot("market-summary")
+        for tab in ("محصولات", "روند قیمت"):
+            try:
+                p.click(f".rep-tabs >> text={tab}", timeout=1500)
+                p.wait_for_timeout(300)
+                shot(f"market-{tab}")
+            except Exception:
+                pass
+        p.goto(f"{BASE}#/watch")
+        p.wait_for_timeout(500)
+        shot("watch")
+        p.click("button[title*='سود روی هر کانال'] >> nth=0") if p.locator("button[title*='سود روی هر کانال']").count() else None
+        p.wait_for_timeout(300)
+        shot("watch-profit-modal")
+        p.keyboard.press("Escape")
+        p.goto(f"{BASE}#/catalog")
+        p.wait_for_timeout(500)
+        shot("catalog")
+        p.goto(f"{BASE}#/dashboard")
+        p.wait_for_timeout(500)
+        shot("dashboard-due")
+        p.goto(f"{BASE}#/contacts")
+        p.wait_for_timeout(400)
+        p.click(".name-cell .n >> nth=1")
+        p.wait_for_timeout(300)
+        shot("card-crm")
+        p.keyboard.press("Escape")
+        p.goto(f"{BASE}#/brands")
+        p.wait_for_timeout(400)
+        p.click(".brand-card >> nth=0")
+        p.wait_for_timeout(400)
+        p.click(".st-hero button")
+        if lang != "fa":  # the labels below are matched by their Persian text
+            shot("strategy-inputs")
+            return
+        p.click("dialog button:has-text('ساخت برنامه')")
+        p.wait_for_timeout(500)
+        p.click(".st-tabs >> text=برندبوک")
+        shot("brandbook")
+        p.click("button:has-text('حالت اسلاید')")
+        p.wait_for_timeout(300)
+        shot("deck")
+
+    for lang in ("fa", "en"):
+        for theme in ("light", "dark"):
+            for (w, hgt) in ((1366, 768), (1100, 680)):
+                ctx, p = page_for(b, w, hgt, theme)
+                ctx.add_init_script(f"try{{localStorage.setItem('lang','{lang}')}}catch(e){{}}")
+                v13_views(p, f"{lang}-{w}-{theme}", lang)
+                ctx.close()
+
     # B2B / RFQ modal
     ctx, p = page_for(b, 1366, 768, "light", "rfq")
     p.goto(f"{BASE}#/market?run=7")

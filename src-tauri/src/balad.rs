@@ -6,6 +6,8 @@
 use crate::db::{Place, Res};
 use crate::logic::{host_path, Contacts};
 use crate::scanner::{goto, js, script};
+use crate::websearch::Hit;
+use tokio_util::sync::CancellationToken;
 use chromiumoxide::Page;
 use serde::Deserialize;
 use std::time::{Duration, Instant};
@@ -61,6 +63,74 @@ return {
 };
 "#;
 
+// ---------------- Balad's own search ----------------
+
+/// Balad's search page for `q`; the scenario key `baladSearchUrl` can replace it if Balad moves it.
+fn search_url(q: &str) -> String {
+    let base = crate::logic::test_seam("HAMISTA_BALAD_BASE")
+        .map(|b| format!("{b}/search?q={{q}}"))
+        .unwrap_or_else(|| script("baladSearchUrl", "https://balad.ir/search?q={q}"));
+    base.replace("{q}", &crate::logic::pct_encode(q))
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Results {
+    anchors: Vec<(String, String)>, // href, visible text
+    html: String,                   // the page source (Balad also embeds its results as JSON)
+    ready: bool,
+}
+
+const SEARCH_JS: &str = r#"
+const a = [...document.querySelectorAll('a[href*="/p/"]')].map(x => [x.href, (x.innerText || '').replace(/\s+/g, ' ').trim()]);
+const html = document.documentElement.innerHTML.slice(0, 1500000);
+window.scrollTo(0, document.body.scrollHeight);
+return { anchors: a, html, ready: document.readyState === 'complete' && (a.length > 0 || html.includes('/p/')) };
+"#;
+
+/// Every `/p/<slug>` path written in a page source (anchors and embedded JSON alike), as full URLs (pure).
+pub fn place_links(html: &str, origin: &str) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    let unescaped = html.replace("\\/", "/"); // JSON writes «/» as «\/»
+    let mut rest = unescaped.as_str();
+    while let Some(i) = rest.find("/p/") {
+        let tail = &rest[i..];
+        let end = tail.find(['"', '\'', ' ', '<', '>', '\\', ')', '\n', '?', '#']).unwrap_or(tail.len());
+        let url = format!("{origin}{}", &tail[..end]);
+        if key_of(&url).is_some() && !out.contains(&url) {
+            out.push(url);
+        }
+        rest = &tail[3..];
+    }
+    out
+}
+
+/// Searches Balad itself in the app's browser (no search engine): the page is scrolled until `limit` places
+/// are listed or nothing new appears. Empty when Balad shows no results or has changed its page.
+pub async fn search(page: &Page, query: &str, limit: usize, token: &CancellationToken) -> Res<Vec<Hit>> {
+    goto(page, &search_url(query)).await;
+    let t = Instant::now();
+    let mut hits: Vec<Hit> = vec![];
+    let mut stale = 0;
+    while t.elapsed() < Duration::from_secs(25) && hits.len() < limit && stale < 3 && !token.is_cancelled() {
+        let r: Results = js(page, &script("baladSearchJs", SEARCH_JS)).await.unwrap_or_default();
+        let before = hits.len();
+        let origin = crate::logic::test_seam("HAMISTA_BALAD_BASE").unwrap_or_else(|| "https://balad.ir".into());
+        let found = r.anchors.iter().map(|(u, title)| (u.clone(), title.clone())).chain(place_links(&r.html, &origin).into_iter().map(|u| (u, String::new())));
+        for (url, title) in found {
+            if let Some(k) = key_of(&url) {
+                if !hits.iter().any(|h| key_of(&h.url).as_deref() == Some(k.as_str())) {
+                    hits.push(Hit { url, title, snippet: String::new() });
+                }
+            }
+        }
+        stale = if hits.len() == before && r.ready { stale + 1 } else { 0 };
+        sleep(Duration::from_millis(900)).await;
+    }
+    hits.truncate(limit);
+    Ok(hits)
+}
+
 pub type Found = (Place, Contacts, Vec<(&'static str, String)>);
 
 pub async fn read(page: &Page, url: &str, mut place: Place) -> Res<Option<Found>> {
@@ -93,6 +163,17 @@ pub async fn read(page: &Page, url: &str, mut place: Place) -> Res<Option<Found>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn places_are_found_in_the_page_source() {
+        let html = r#"<a href="/p/%DA%A9%D8%A7%D9%81%D9%87-tehran_coffee-shop-4ctFksRaCpebRg">x</a>
+            {"url":"\/p\/%D8%B3%D9%87-area_bakery-9AbCdEfGhIjKlM"} <a href="/p/%DA%A9%D8%A7%D9%81%D9%87-tehran_coffee-shop-4ctFksRaCpebRg?x=1">dup</a>
+            <a href="/blog/cafe-4ctFksRaCpebRg">blog</a> /p/ <a href="/p/short-ab">short</a>"#;
+        let l = place_links(html, "https://balad.ir");
+        assert_eq!(l.len(), 2, "{l:?}");
+        assert!(l.iter().all(|u| u.starts_with("https://balad.ir/p/")));
+        assert!(search_url("کافه").starts_with("https://balad.ir/search?q=%DA%A9"));
+    }
 
     #[test]
     fn place_keys() {

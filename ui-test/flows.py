@@ -535,6 +535,109 @@ with sync_playwright() as pw:
     p.wait_for_timeout(900)
     q = calls(p, "market_search")[-1]["req"]
     check("market site field", q.get("site") == "https://myshop.ir/honey" and "web" in q.get("platforms", []), q)
+
+    # ---- v13: opportunity, profit per channel, gold filter, FX switch ----
+    check("opportunity card", p.locator(".opp-card").count() == 1 and p.locator(".opp-card .opp-score b").inner_text().strip() in ("۷۸", "78"), p.locator(".opp-card").count())
+    check("profit card in summary", p.locator(".profit-card tbody tr").count() >= 3, p.locator(".profit-card tbody tr").count())
+    p.fill(".profit-card input >> nth=0", "300000")
+    p.fill(".profit-card input >> nth=1", "500000")
+    p.keyboard.press("Tab")
+    p.wait_for_timeout(300)
+    check("profit rows computed", p.locator(".profit-card .best-row").count() == 1 and calls(p, "profit_compare"), calls(p, "profit_compare")[-1:])
+    p.click(".opp-card button")
+    p.wait_for_timeout(400)
+    check("gold hunt opens the products tab", p.locator(".gold-row").count() >= 1 and p.locator(".gold-btn.on").count() == 1, p.locator(".gold-row").count())
+    n_gold = p.locator(".mkt-t tbody tr").count()
+    p.click(".gold-btn")
+    p.wait_for_timeout(200)
+    check("gold filter toggles", p.locator(".mkt-t tbody tr").count() > n_gold, (n_gold, p.locator(".mkt-t tbody tr").count()))
+    p.click(".rep-tabs button:has-text('روند قیمت')")
+    p.wait_for_timeout(300)
+    check("fx switch has three states", p.locator(".fx-seg button").count() == 3, p.locator(".fx-seg button").count())
+    p.click(".fx-seg button >> nth=1")
+    p.wait_for_timeout(400)
+    check("fx_adjust asked", len(calls(p, "fx_adjust")) >= 1 and p.locator(".fx-info").inner_text().strip() != "", calls(p, "fx_adjust")[-1:] and p.locator(".fx-info").inner_text())
+    # ---- v13: windowed table keeps the DOM small ----
+    p.goto(f"{BASE}#/help")
+    p.wait_for_timeout(300)
+    n = p.evaluate("""async () => {
+      const { vtable, h } = await import('./js/core.js');
+      const rows = Array.from({ length: 3000 }, (_, i) => i);
+      const vt = vtable({ head: h('thead', {}, h('tr', {}, h('th', {}, '#'))), rows, row: (i) => h('tr', {}, h('td', {}, String(i))), rowHeight: 40 });
+      vt.el.style.maxHeight = '400px'; vt.el.style.overflow = 'auto';
+      document.body.append(vt.el);
+      await new Promise((r) => setTimeout(r, 100));
+      const first = vt.el.querySelectorAll('tbody tr').length;
+      vt.el.scrollTop = 40 * 2000;
+      await new Promise((r) => setTimeout(r, 200));
+      const at = [...vt.el.querySelectorAll('tbody td')].map((t) => t.textContent).filter((t) => /^[0-9]+$/.test(t)).map(Number);
+      return { first, after: at.length, min: Math.min(...at), max: Math.max(...at) };
+    }""")
+    check("vtable windows 3000 rows", n["first"] < 120 and n["after"] < 120 and n["min"] > 1500, n)
+    # ---- v13: watchlist buy-box, alert settings, catalogue tracking ----
+    p.goto(f"{BASE}#/watch")
+    p.wait_for_timeout(500)
+    check("watch buybox shown", p.locator(".bb-line, .bb").count() >= 1, p.locator("tbody").first.inner_text()[:200])
+    p.click("button:has-text('هشدار تلگرام / پیامک')")
+    p.wait_for_timeout(300)
+    check("alert modal reads config", len(calls(p, "alert_config")) >= 1 and p.locator("dialog").count() == 1)
+    p.keyboard.press("Escape")
+    p.goto(f"{BASE}#/catalog")
+    p.wait_for_timeout(500)
+    p.click("button[title*='ردیابی بای‌باکس'] >> nth=0")
+    p.wait_for_timeout(300)
+    check("track modal", p.locator("dialog").count() == 1)
+    p.keyboard.press("Escape")
+    # ---- v13: product list → catalogue / WooCommerce / Basalam ----
+    p.goto(f"{BASE}#/plist")
+    p.wait_for_timeout(400)
+    p.fill(".card input.ltr", "https://basalam.com/asal_shop")
+    p.click("button:has-text('دریافت لیست')")
+    p.wait_for_timeout(700)
+    p.click("button:has-text('خروجی ووکامرس')")
+    p.wait_for_timeout(300)
+    p.click("button:has-text('خروجی باسلام')")
+    p.wait_for_timeout(300)
+    wc, bs = calls(p, "export_woocommerce_csv"), calls(p, "export_basalam_xlsx")
+    check("woocommerce + basalam export payload", wc and bs and len(wc[-1]["items"]) == 2 and len(bs[-1]["items"]) == 2, (wc[-1:], bs[-1:]))
+    p.click("button:has-text('کالاهای من')")
+    p.wait_for_timeout(300)
+    ca = calls(p, "catalog_add")
+    check("catalog_add payload", ca and len(ca[-1]["items"]) == 2 and ca[-1]["items"][0].get("title"), ca[-1:])
+    # ---- v13: B2B CRM on the card and the dashboard ----
+    p.goto(f"{BASE}#/contacts")
+    p.wait_for_timeout(500)
+    p.click("tbody tr >> nth=0 >> td >> nth=2")
+    p.wait_for_timeout(400)
+    check("crm timeline asked", len(calls(p, "place_logs")) >= 1 and p.locator(".crm").count() == 1)
+    p.fill(".crm-form textarea, .crm-form input[type=text], .crm-form input:not([type])", "تماس گرفتم، فاکتور خواست")
+    p.click(".crm-form button.primary")
+    p.wait_for_timeout(300)
+    pl = calls(p, "place_log_add")
+    check("crm entry shown", p.locator(".crm-item").count() == 1, p.locator(".crm-item").count())
+    check("place_log_add", pl and pl[-1]["note"].startswith("تماس گرفتم") and pl[-1]["kind"] in ("call", "message", "meeting", "deal", "note"), pl[-1:])
+    p.click(".crm-next button:has-text('فردا')")
+    p.wait_for_timeout(300)
+    fu = calls(p, "follow_up_set")
+    check("follow_up_set tomorrow", fu and len(fu[-1]["at"]) == 16, fu[-1:])
+    p.keyboard.press("Escape")
+    p.goto(f"{BASE}#/dashboard")
+    p.wait_for_timeout(500)
+    check("due card", p.locator(".dash-due .it").count() == 2 and p.locator(".dash-due .pill.bad").count() >= 1, p.locator(".dash-due .it").count())
+    # ---- v13: brandbook, pitch deck, white-label ----
+    p.goto(f"{BASE}#/brands")
+    p.wait_for_timeout(500)
+    p.click(".brand-card >> nth=0")
+    p.wait_for_timeout(400)
+    p.click(".st-hero button")
+    p.click("dialog button:has-text('ساخت برنامه')")
+    p.wait_for_timeout(500)
+    p.click(".st-tabs >> text=برندبوک")
+    check("brandbook palette", p.locator(".bb-palette:visible .bb-sw").count() >= 3, p.locator(".bb-sw").count())
+    p.click("button:has-text('حالت اسلاید')")
+    p.wait_for_timeout(300)
+    check("deck stage", p.locator(".deck-stage").count() == 1 and p.locator("dialog").count() == 1)
+    p.keyboard.press("Escape")
     ctx.close()
     b.close()
 

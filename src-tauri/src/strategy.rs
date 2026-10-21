@@ -37,6 +37,20 @@ pub struct Inputs {
     pub fixed_cost: i64,
     /// Units the business can deliver per month (0 = not limited).
     pub capacity: i64,
+    /// Sales-channel commission, % of the price (None = the sector's usual rate).
+    pub channel_fee_pct: Option<f64>,
+    /// VAT charged on the channel's commission, % (None = 10).
+    pub vat_pct: Option<f64>,
+    /// Packaging + delivery per unit, Toman (None = the sector's usual share of the price).
+    pub pack_cost: Option<i64>,
+    /// Share of orders returned, % (None = the sector's usual rate).
+    pub return_pct: Option<f64>,
+    // ---- report cover (white label for consultants and agencies) ----
+    /// Who prepared the plan, and for whom.
+    pub advisor: String,
+    pub client: String,
+    /// The advisor's / brand's logo as a small data: URL (the page shrinks it before saving).
+    pub logo: String,
 }
 
 // ---------------- output ----------------
@@ -89,6 +103,13 @@ pub struct Finance {
     pub price: i64,
     pub unit_cost: i64,
     pub channel_fee: i64,
+    /// Per unit: VAT on the commission, packaging + delivery, and the expected cost of returns.
+    pub vat: i64,
+    pub pack: i64,
+    pub returns: i64,
+    pub fee_pct: f64,
+    pub vat_pct: f64,
+    pub return_pct: f64,
     pub unit_margin: i64,
     pub margin_pct: f64,
     pub fixed: i64,
@@ -97,6 +118,36 @@ pub struct Finance {
     pub months: Vec<Month>,
     /// Where each number comes from (input, market median, sector default).
     pub basis: Vec<String>,
+}
+
+/// A colour of the suggested palette.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Swatch {
+    pub role: String,
+    pub hex: String,
+    pub usage: String,
+}
+
+/// One axis of the tone-of-voice matrix: `value` 0 = the left pole, 100 = the right pole.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ToneAxis {
+    pub left: String,
+    pub right: String,
+    pub value: i64,
+}
+
+/// The visual identity suggested for the brand: palette, fonts and tone of voice.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Brandbook {
+    pub archetype: String,
+    pub palette: Vec<Swatch>,
+    pub heading_font: String,
+    pub body_font: String,
+    pub font_note: String,
+    pub tone: Vec<ToneAxis>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -128,6 +179,7 @@ pub struct Strategy {
     /// The measured facts this plan rests on (from the brand analysis).
     pub evidence: Vec<String>,
     pub inputs: Inputs,
+    pub brandbook: Brandbook,
     /// The plan as a prompt, to deepen any part with an AI assistant.
     pub prompt: String,
 }
@@ -140,6 +192,17 @@ struct Sector {
     keywords: &'static [&'static str],
     /// Usual gross margin when the owner gives no cost.
     margin: f64,
+    /// Usual commission of the sector's sales channel (%), share of orders returned (%), and packaging +
+    /// delivery as a share of the price (%) in the Iranian market. Estimates; the owner can overwrite each.
+    fee: f64,
+    ret: f64,
+    pack: f64,
+    /// Suggested palette: main, complement, background, accent.
+    palette: [&'static str; 4],
+    /// Suggested Persian heading / body fonts.
+    fonts: (&'static str, &'static str),
+    /// Tone of voice, 0–100 on: رسمی→صمیمی, کلاسیک→مدرن, منطقی→احساسی, جدی→بازیگوش.
+    tone: [i64; 4],
     segments: &'static [&'static str],
     channels: &'static [&'static str],
     partners: &'static [&'static str],
@@ -158,6 +221,12 @@ const SECTORS: &[Sector] = &[
         name: "مواد غذایی، کشاورزی و ارگانیک",
         keywords: &["عسل", "زعفران", "خشکبار", "چای", "برنج", "روغن", "ادویه", "خرما", "شیرینی", "لبنیات", "قهوه", "کشمش", "پسته", "گردو", "بادام", "مربا", "ترشی", "سبزی", "میوه", "غذا", "خوراکی", "ارگانیک", "شکلات", "نان", "آجیل"],
         margin: 0.35,
+        fee: 9.0,
+        ret: 2.0,
+        pack: 6.0,
+        palette: ["#8A4B0F","#E9A23B","#FFF6E5","#3F6B3A"],
+        fonts: ("لاله‌زار","وزیرمتن"),
+        tone: [75,35,70,45],
         segments: &["خانواده‌های سلامت‌محور شهری (۲۵ تا ۵۵ سال)", "خریداران هدیه مناسبتی (یلدا، نوروز، سازمانی)", "کافه‌ها، شیرینی‌فروشی‌ها و رستوران‌ها (خرید عمده)", "فروشگاه‌های ارگانیک و هایپرمارکت‌ها"],
         channels: &["غرفه باسلام و فروشگاه دیجی‌کالا", "سایت اختصاصی با اینماد", "اینستاگرام و فروش دایرکت", "سوپرمارکت‌های آنلاین (اسنپ‌مارکت، اکالا)", "پخش‌کننده‌های منطقه‌ای و بازار عمده", "هدایای سازمانی (B2B)"],
         partners: &["زنبوردار/کشاورز طرف قرارداد و تأمین پایدار مواد اولیه", "آزمایشگاه معتمد برای آزمون کیفیت (مثلاً آزمون ساکارز/HMF عسل)", "چاپخانه و تأمین‌کننده بسته‌بندی بهداشتی", "شرکت‌های پست و پیک سرد/گرم", "پخش‌کننده‌ها و عمده‌فروش‌ها"],
@@ -173,6 +242,12 @@ const SECTORS: &[Sector] = &[
         name: "پوشاک، کیف و کفش و اکسسوری",
         keywords: &["پوشاک", "لباس", "مانتو", "کیف", "کفش", "شال", "روسری", "تیشرت", "شلوار", "اکسسوری", "زیورآلات", "جواهر", "ساعت", "عینک", "کت", "پیراهن"],
         margin: 0.5,
+        fee: 15.0,
+        ret: 8.0,
+        pack: 4.0,
+        palette: ["#1C1C1E","#C9A27E","#F7F3EE","#B5495B"],
+        fonts: ("استعداد","وزیرمتن"),
+        tone: [55,80,75,55],
         segments: &["زنان ۱۸ تا ۴۰ ساله شهری، فعال در اینستاگرام", "خریداران هدیه", "بوتیک‌ها و فروشگاه‌های چندبرندی (عمده)"],
         channels: &["اینستاگرام (پیج فروشگاهی و استوری)", "سایت اختصاصی با اینماد و امکان تعویض", "دیجی‌استایل/دیجی‌کالا و باسلام", "بوتیک‌ها و پاپ‌آپ‌استور", "نمایشگاه‌ها و بازارچه‌ها"],
         partners: &["تولیدی/کارگاه دوخت و تأمین پارچه", "عکاس و مدل", "اینفلوئنسرهای سبک زندگی", "شرکت ارسال با امکان مرجوعی"],
@@ -188,6 +263,12 @@ const SECTORS: &[Sector] = &[
         name: "آرایشی، بهداشتی و مراقبت پوست",
         keywords: &["آرایشی", "بهداشتی", "کرم", "شامپو", "عطر", "ادکلن", "صابون", "رژ", "پوست", "مو", "ماسک", "سرم", "لوسیون"],
         margin: 0.5,
+        fee: 12.0,
+        ret: 3.0,
+        pack: 4.0,
+        palette: ["#C2185B","#F3C6D3","#FFF7F9","#2E7D6B"],
+        fonts: ("استعداد","شبنم"),
+        tone: [65,70,85,55],
         segments: &["زنان ۲۰ تا ۴۵ ساله با دغدغه مراقبت پوست", "مردان مراقبت شخصی", "سالن‌های زیبایی و آرایشگاه‌ها (عمده)", "داروخانه‌ها"],
         channels: &["داروخانه‌های آنلاین و دیجی‌کالا", "سایت اختصاصی با اینماد", "اینستاگرام", "داروخانه‌ها و فروشگاه‌های آرایشی", "سالن‌های زیبایی"],
         partners: &["کارخانه تولید قراردادی (فاسون) دارای مجوز", "پزشک/متخصص پوست برای تأیید علمی", "اینفلوئنسرهای زیبایی", "پخش دارویی"],
@@ -203,6 +284,12 @@ const SECTORS: &[Sector] = &[
         name: "لوازم خانگی، دکوراسیون و مبلمان",
         keywords: &["مبل", "مبلمان", "دکور", "دکوراسیون", "فرش", "پرده", "ظروف", "آشپزخانه", "لوازم خانگی", "روشنایی", "لوستر", "میز", "صندلی", "تخت", "کمد", "سرویس"],
         margin: 0.35,
+        fee: 10.0,
+        ret: 4.0,
+        pack: 8.0,
+        palette: ["#2F4858","#D4A373","#F6F1EA","#5B8C85"],
+        fonts: ("وزیرمتن (ضخیم)","شبنم"),
+        tone: [55,50,60,35],
         segments: &["زوج‌های جوان در حال تهیه جهیزیه", "خانواده‌های در حال نوسازی خانه", "طراحان داخلی و معماران", "هتل‌ها، کافه‌ها و دفاتر (پروژه‌ای)"],
         channels: &["دیجی‌کالا، باسلام و ترب", "سایت با کاتالوگ و ارسال/نصب", "اینستاگرام و پینترست", "شوروم و فروشگاه حضوری", "همکاری با طراحان داخلی (B2B)"],
         partners: &["کارگاه تولید و تأمین متریال", "باربری و نصاب", "طراحان داخلی", "فروشگاه‌های اقساطی/اعتباری"],
@@ -218,6 +305,12 @@ const SECTORS: &[Sector] = &[
         name: "کالای دیجیتال و الکترونیک",
         keywords: &["موبایل", "گوشی", "لپ‌تاپ", "لپ تاپ", "هدفون", "شارژر", "کابل", "قاب", "دیجیتال", "کامپیوتر", "تبلت", "ساعت هوشمند", "اسپیکر", "دوربین"],
         margin: 0.15,
+        fee: 6.0,
+        ret: 3.0,
+        pack: 2.0,
+        palette: ["#0B3D91","#00B8D9","#F4F7FB","#FF6B35"],
+        fonts: ("وزیرمتن (ضخیم)","وزیرمتن"),
+        tone: [35,90,30,45],
         segments: &["جوانان ۱۶ تا ۳۵ ساله فناوری‌محور", "کسب‌وکارهای کوچک و دفاتر", "تعمیرکاران و فروشگاه‌های موبایل (عمده)"],
         channels: &["دیجی‌کالا و ترب (مقایسه قیمت)", "سایت با اینماد و گارانتی", "اینستاگرام و تلگرام", "فروشگاه حضوری در پاساژهای تخصصی"],
         partners: &["واردکننده/نمایندگی رسمی و گارانتی", "شرکت‌های ارسال سریع", "تولیدکنندگان محتوای تکنولوژی"],
@@ -233,6 +326,12 @@ const SECTORS: &[Sector] = &[
         name: "صنایع دستی، هنری و هدیه",
         keywords: &["صنایع دستی", "سفال", "گلیم", "قالی", "فیروزه", "مینا", "خاتم", "چرم", "هنری", "دست‌ساز", "دستساز", "هدیه", "کادو", "شمع", "تابلو", "سرامیک", "بافت"],
         margin: 0.45,
+        fee: 12.0,
+        ret: 3.0,
+        pack: 7.0,
+        palette: ["#7B3F00","#2A7F8E","#FBF4E8","#D1495B"],
+        fonts: ("لاله‌زار","شبنم"),
+        tone: [70,30,85,60],
         segments: &["خریداران هدیه و سوغات", "دوستداران هنر و دکور اصیل", "گردشگران و خریداران خارجی", "شرکت‌ها برای هدیه سازمانی"],
         channels: &["غرفه باسلام", "اینستاگرام و پینترست", "سایت چندزبانه با اینماد", "بازارچه‌ها، نمایشگاه‌ها و فروشگاه‌های سوغات", "بازارهای بین‌المللی (Etsy از طریق واسطه)"],
         partners: &["هنرمندان و کارگاه‌های محلی", "فروشگاه‌های سوغات و هتل‌ها", "آژانس‌های گردشگری", "شرکت‌های ارسال بین‌المللی"],
@@ -248,6 +347,12 @@ const SECTORS: &[Sector] = &[
         name: "سلامت، مکمل و گیاهان دارویی",
         keywords: &["مکمل", "ویتامین", "گیاهی", "دارویی", "طب سنتی", "عرقیات", "دمنوش", "پروتئین", "ورزشی", "سلامت", "رژیمی"],
         margin: 0.45,
+        fee: 10.0,
+        ret: 2.0,
+        pack: 4.0,
+        palette: ["#1B7F5B","#A8D5BA","#F3FAF6","#E4572E"],
+        fonts: ("استعداد","وزیرمتن"),
+        tone: [40,55,55,15],
         segments: &["افراد سلامت‌محور و ورزشکاران", "میانسالان و سالمندان", "داروخانه‌ها و عطاری‌ها", "باشگاه‌های ورزشی"],
         channels: &["داروخانه‌های آنلاین و دیجی‌کالا", "سایت با اینماد و مشاوره", "اینستاگرام", "داروخانه‌ها، عطاری‌ها و باشگاه‌ها"],
         partners: &["تولیدکننده دارای مجوز", "متخصص تغذیه/پزشک", "پخش دارویی", "مربیان ورزشی"],
@@ -263,6 +368,12 @@ const SECTORS: &[Sector] = &[
         name: "صنعتی، ساختمانی و تجهیزات (B2B)",
         keywords: &["صنعتی", "قطعه", "قطعات", "تجهیزات", "مصالح", "ساختمانی", "ابزار", "ماشین", "دستگاه", "لوله", "کابل برق", "رنگ", "شیرآلات", "پمپ", "یراق", "پلاستیک", "بسته‌بندی"],
         margin: 0.25,
+        fee: 5.0,
+        ret: 2.0,
+        pack: 5.0,
+        palette: ["#1F2A37","#F2A900","#EEF1F4","#2E86AB"],
+        fonts: ("وزیرمتن (ضخیم)","وزیرمتن"),
+        tone: [15,45,15,10],
         segments: &["پیمانکاران و شرکت‌های ساختمانی", "کارخانه‌ها و واحدهای تولیدی", "فروشگاه‌های ابزار و مصالح (عمده)", "پروژه‌های دولتی و مناقصه‌ها"],
         channels: &["فروش مستقیم و تیم فروش میدانی", "سایت کاتالوگی با اینماد و فرم استعلام", "دایرکتوری‌های B2B و ترب", "نمایشگاه‌های تخصصی", "نمایندگی‌های استانی"],
         partners: &["تأمین‌کنندگان مواد اولیه", "نمایندگان فروش استانی", "مشاوران فنی و مهندسان ناظر", "شرکت‌های حمل بار"],
@@ -278,6 +389,12 @@ const SECTORS: &[Sector] = &[
         name: "خدمات (کافه، رستوران، آموزش، زیبایی و …)",
         keywords: &["کافه", "رستوران", "آموزش", "کلاس", "آرایشگاه", "سالن", "خدمات", "مشاوره", "باشگاه", "کلینیک", "آموزشگاه", "تعمیر"],
         margin: 0.6,
+        fee: 8.0,
+        ret: 4.0,
+        pack: 0.0,
+        palette: ["#2B2D42","#EF8354","#F8F9FA","#4F9D9D"],
+        fonts: ("استعداد","وزیرمتن"),
+        tone: [60,60,65,45],
         segments: &["ساکنان و شاغلان محدوده جغرافیایی", "مشتریان وفادار و تکراری", "سازمان‌ها (قرارداد گروهی)"],
         channels: &["گوگل‌مپ و نشان/بلد", "اینستاگرام محلی", "سایت رزرو آنلاین", "پلتفرم‌های رزرو/سفارش (اسنپ‌فود و …)", "معرفی مشتری به مشتری"],
         partners: &["تأمین‌کنندگان مواد/لوازم", "پلتفرم‌های رزرو و سفارش", "کسب‌وکارهای مکمل محله"],
@@ -293,6 +410,12 @@ const SECTORS: &[Sector] = &[
         name: "کالای مصرفی عمومی",
         keywords: &[],
         margin: 0.3,
+        fee: 10.0,
+        ret: 4.0,
+        pack: 5.0,
+        palette: ["#1F2933","#3E7CB1","#F5F7FA","#F5A623"],
+        fonts: ("وزیرمتن (ضخیم)","شبنم"),
+        tone: [55,55,50,40],
         segments: &["خریداران آنلاین قیمت‌محور", "خریداران کیفیت‌محور و وفادار", "خرده‌فروشان و عمده‌فروشان"],
         channels: &["دیجی‌کالا، باسلام و ترب", "سایت اختصاصی با اینماد", "اینستاگرام و تلگرام", "پخش‌کننده‌ها و فروشگاه‌های حضوری"],
         partners: &["تأمین‌کنندگان و تولیدکنندگان", "شرکت‌های ارسال", "پخش‌کننده‌ها"],
@@ -369,10 +492,10 @@ fn sector_of(key: &str, category: &str, name: &str) -> &'static Sector {
     if let Some(s) = SECTORS.iter().find(|s| s.key == key) {
         return s;
     }
-    let text = crate::market::norm(&format!("{category} {name}"));
+    let text = format!("{category} {name}");
     SECTORS
         .iter()
-        .find(|s| s.keywords.iter().any(|k| text.contains(&crate::market::norm(k))))
+        .find(|s| s.keywords.iter().any(|k| crate::fees::has_word(&text, k)))
         .unwrap_or(&SECTORS[SECTORS.len() - 1])
 }
 
@@ -405,8 +528,17 @@ fn toman(n: i64) -> String {
     format!("{} تومان", crate::logic::fa_num(n as f64))
 }
 
+/// Of the goods in a returned order, the share that cannot be sold again (damaged, opened, expired).
+const RETURN_WRITE_OFF: f64 = 0.3;
+
 /// Unit economics and a 12-month base scenario from the owner's numbers, the market and the sector.
-pub fn finance(inp: &Inputs, market_median: i64, store_median: i64, margin: f64, stage: &str) -> Finance {
+///
+/// Per unit sold: price − cost − channel commission − VAT on that commission − packaging and
+/// delivery − the expected cost of returns. A return costs the delivery both ways and the share of
+/// the goods that cannot be resold, spread over the units that stay sold: `r / (1 − r) × (2 × pack +
+/// write-off × cost)` for a return rate `r`.
+fn finance(inp: &Inputs, market_median: i64, store_median: i64, sector: &Sector, stage: &str) -> Finance {
+    let margin = sector.margin;
     let mut basis = vec![];
     let price = if inp.price > 0 {
         basis.push("قیمت فروش: عددی که خودتان وارد کردید.".into());
@@ -427,9 +559,18 @@ pub fn finance(inp: &Inputs, market_median: i64, store_median: i64, margin: f64,
         basis.push(format!("بهای تمام‌شده: فرض حاشیه ناخالص معمول این حوزه ({}٪)؛ برای دقت، بهای تمام‌شده واقعی را وارد کنید.", fa((margin * 100.0).round())));
         (price as f64 * (1.0 - margin)) as i64
     };
-    let channel_fee = (price as f64 * 0.08) as i64; // marketplace commission / payment gateway / packaging, blended
-    basis.push("هزینه کانال (کمیسیون بازارگاه، درگاه، بسته‌بندی): میانگین ۸٪ قیمت فروش.".into());
-    let unit_margin = price - unit_cost - channel_fee;
+    let pick = |own: Option<f64>, usual: f64, hi: f64| own.filter(|v| v.is_finite()).map_or((usual, false), |v| (v.clamp(0.0, hi), true));
+    let ((fee_pct, fee_own), (vat_pct, vat_own), (return_pct, ret_own)) = (pick(inp.channel_fee_pct, sector.fee, 40.0), pick(inp.vat_pct, 10.0, 30.0), pick(inp.return_pct, sector.ret, 60.0));
+    let channel_fee = (price as f64 * fee_pct / 100.0).round() as i64;
+    basis.push(format!("کارمزد کانال فروش: {}٪ قیمت ({}).", fa(fee_pct), if fee_own { "عدد شما" } else { "نرخ معمول این حوزه؛ تعرفه واقعی پلتفرم خود را وارد کنید" }));
+    let vat = (channel_fee as f64 * vat_pct / 100.0).round() as i64;
+    basis.push(format!("مالیات بر ارزش افزوده: {}٪ روی کارمزد کانال ({}).", fa(vat_pct), if vat_own { "عدد شما" } else { "نرخ قانونی" }));
+    let pack = inp.pack_cost.map_or_else(|| (price as f64 * sector.pack / 100.0).round() as i64, |v| v.max(0));
+    basis.push(if inp.pack_cost.is_some() { "بسته‌بندی و ارسال هر واحد: عدد شما.".into() } else { format!("بسته‌بندی و ارسال هر واحد: {}٪ قیمت (برآورد معمول این حوزه).", fa(sector.pack)) });
+    let r = return_pct / 100.0;
+    let returns = (r / (1.0 - r) * (2.0 * pack as f64 + RETURN_WRITE_OFF * unit_cost as f64)).round() as i64;
+    basis.push(format!("مرجوعی: {}٪ سفارش‌ها ({}؛ هزینه ارسال رفت‌وبرگشت و {}٪ کالای برگشتی غیرقابل فروش).", fa(return_pct), if ret_own { "عدد شما" } else { "نرخ معمول این حوزه" }, fa(RETURN_WRITE_OFF * 100.0)));
+    let unit_margin = price - unit_cost - channel_fee - vat - pack - returns;
     let fixed = inp.fixed_cost.max(0);
     let budget = inp.budget.max(0);
     let break_even_units = if unit_margin > 0 { ((fixed + budget) as f64 / unit_margin as f64).ceil() as i64 } else { 0 };
@@ -473,6 +614,12 @@ pub fn finance(inp: &Inputs, market_median: i64, store_median: i64, margin: f64,
         price,
         unit_cost,
         channel_fee,
+        vat,
+        pack,
+        returns,
+        fee_pct,
+        vat_pct,
+        return_pct,
         unit_margin,
         margin_pct: if price > 0 { (unit_margin as f64 * 1000.0 / price as f64).round() / 10.0 } else { 0.0 },
         fixed,
@@ -593,7 +740,7 @@ pub fn build(b: &Brand, inp: &Inputs) -> Strategy {
     } else {
         "mid"
     };
-    let fin = finance(inp, market_median, store_median, sector.margin, stage_key);
+    let fin = finance(inp, market_median, store_median, sector, stage_key);
     let competitors: Vec<String> = r.competitors.iter().take(4).map(|c| c.name.clone()).collect();
     let has_site = r.site.ok;
     let has_insta = r.insta.followers.is_some();
@@ -969,10 +1116,60 @@ pub fn build(b: &Brand, inp: &Inputs) -> Strategy {
         kpis,
         evidence,
         inputs: inp.clone(),
+        brandbook: brandbook(sector, tier),
         prompt: String::new(),
     };
     st.prompt = prompt(&st);
     st
+}
+
+/// The visual identity suggested from the sector's archetype: palette (the main colour is deepened for a
+/// premium price position), a Persian font pair and the tone-of-voice matrix.
+fn brandbook(sector: &Sector, tier: &str) -> Brandbook {
+    let roles = [("رنگ اصلی", "لوگو، دکمه‌ها، تیتر و بسته‌بندی؛ حدود ۶۰٪ فضای بصری برند"), ("رنگ مکمل", "کارت‌ها، پس‌زمینه بخش‌ها، آیکن و جزئیات بسته؛ حدود ۳۰٪"), ("رنگ زمینه", "پس‌زمینه سایت، کاتالوگ و پست‌ها؛ فضای خالی و خوانایی"), ("رنگ تأکید", "فراخوان خرید، تخفیف و نشان‌ها؛ کمتر از ۱۰٪ و فقط جای مهم")];
+    let mut palette: Vec<Swatch> = roles.iter().zip(sector.palette).map(|((role, usage), hex)| Swatch { role: (*role).into(), hex: hex.into(), usage: (*usage).into() }).collect();
+    if tier == "premium" {
+        palette[0].hex = shade(sector.palette[0], 0.7);
+        palette[0].usage.push_str("؛ برای جایگاه پریمیوم کمی تیره‌تر انتخاب شد");
+    }
+    let axes = [("رسمی", "صمیمی"), ("کلاسیک", "مدرن"), ("منطقی", "احساسی"), ("جدی", "بازیگوش")];
+    Brandbook {
+        archetype: sector.archetype.0.into(),
+        palette,
+        heading_font: sector.fonts.0.into(),
+        body_font: sector.fonts.1.into(),
+        font_note: "فقط یک جفت فونت در همه‌جا (سایت، بسته، شبکه‌ها)؛ مجوز استفاده تجاری فونت را بررسی کنید.".into(),
+        tone: axes.iter().zip(sector.tone).map(|((l, r), v)| ToneAxis { left: (*l).into(), right: (*r).into(), value: v }).collect(),
+    }
+}
+
+/// `#rrggbb` darkened to `k` (0–1) of its brightness.
+fn shade(hex: &str, k: f64) -> String {
+    let n = u32::from_str_radix(hex.trim_start_matches('#'), 16).unwrap_or(0);
+    let ch = |shift: u32| (f64::from((n >> shift) & 0xff) * k).round() as u32;
+    format!("#{:02x}{:02x}{:02x}", ch(16), ch(8), ch(0))
+}
+
+impl Inputs {
+    /// The owner's answers as they may be kept: bounded text, a logo that really is a small image.
+    pub fn sanitized(mut self) -> Result<Self, String> {
+        let cut = |s: &str, n: usize| s.trim().chars().take(n).collect::<String>();
+        self.advisor = cut(&self.advisor, 80);
+        self.client = cut(&self.client, 80);
+        self.audience = cut(&self.audience, 200);
+        self.usp = cut(&self.usp, 400);
+        self.region = cut(&self.region, 80);
+        self.logo = self.logo.trim().to_string();
+        if !self.logo.is_empty() && (!self.logo.starts_with("data:image/") || self.logo.len() > 300_000) {
+            return Err("لوگو باید یک تصویر کوچک (کمتر از ۲۰۰ کیلوبایت) باشد.".into());
+        }
+        for v in [self.budget, self.price, self.unit_cost, self.fixed_cost, self.capacity] {
+            if v < 0 {
+                return Err("مبلغ‌ها نمی‌توانند منفی باشند.".into());
+            }
+        }
+        Ok(self)
+    }
 }
 
 /// The plan, compact, as a request to an AI assistant for long-form writing.
@@ -1005,29 +1202,82 @@ mod tests {
         assert_eq!(sector_of("", "", "شیرآلات البرز").key, "industrial");
         assert_eq!(sector_of("beauty", "عسل", "").key, "beauty", "the owner's choice wins");
         assert_eq!(sector_of("", "چیزی دیگر", "").key, "general");
+        assert_eq!(sector_of("", "مانتو زنانه", "").key, "fashion", "«نان» inside «زنانه» is not bread");
     }
 
     #[test]
     fn unit_economics_and_projection() {
+        let general = sector_of("general", "", "");
         let inp = Inputs {
             price: 500_000,
             unit_cost: 250_000,
             fixed_cost: 20_000_000,
             budget: 10_000_000,
+            channel_fee_pct: Some(8.0),
+            vat_pct: Some(10.0),
+            pack_cost: Some(20_000),
+            return_pct: Some(0.0),
             ..Default::default()
         };
-        let f = finance(&inp, 0, 0, 0.35, "startup");
-        assert_eq!(f.channel_fee, 40_000);
-        assert_eq!(f.unit_margin, 210_000);
-        assert_eq!(f.break_even_units, 143); // 30M / 210k
+        let f = finance(&inp, 0, 0, general, "startup");
+        // 500k − 250k cost − 40k commission − 4k VAT on it − 20k packaging
+        assert_eq!((f.channel_fee, f.vat, f.pack, f.returns), (40_000, 4_000, 20_000, 0));
+        assert_eq!(f.unit_margin, 186_000);
+        assert_eq!(f.break_even_units, 162); // 30M / 186k
         assert_eq!(f.months.len(), 12);
         assert!(f.months[11].units > f.months[0].units);
-        assert_eq!(f.months[0].profit, f.months[0].units * 210_000 - 30_000_000);
+        assert_eq!(f.months[0].profit, f.months[0].units * 186_000 - 30_000_000);
+        // returns: 5% of orders, each costs 2 × packaging + 30% of the goods, spread over the kept sales
+        let r = finance(&Inputs { return_pct: Some(5.0), ..inp.clone() }, 0, 0, general, "startup");
+        assert_eq!(r.returns, 6_053);
+        assert_eq!(r.unit_margin, 186_000 - 6_053);
         // no price anywhere → no projection, and no division by zero
-        assert!(finance(&Inputs::default(), 0, 0, 0.35, "idea").months.is_empty());
-        // market median + sector margin when the owner gives nothing
-        let g = finance(&Inputs::default(), 400_000, 0, 0.35, "growth");
+        assert!(finance(&Inputs::default(), 0, 0, general, "idea").months.is_empty());
+        // market median + the sector's usual margin, fee, packaging and returns when the owner gives nothing
+        let food = sector_of("food", "", "");
+        let g = finance(&Inputs::default(), 400_000, 0, food, "growth");
         assert_eq!((g.price, g.unit_cost), (400_000, 260_000));
+        assert_eq!((g.fee_pct, g.vat_pct, g.return_pct), (9.0, 10.0, 2.0));
+        assert_eq!((g.channel_fee, g.vat, g.pack), (36_000, 3_600, 24_000));
+        assert!(g.unit_margin < 400_000 - 260_000 - 36_000, "every cost reduces the margin");
+        assert!(g.basis.iter().any(|b| b.contains("مرجوعی")));
+    }
+
+    #[test]
+    fn brandbook_follows_the_sector_and_the_price_position() {
+        let food = sector_of("food", "", "");
+        let mid = brandbook(food, "mid");
+        assert_eq!(mid.palette.len(), 4);
+        assert!(mid.palette.iter().all(|c| c.hex.len() == 7 && c.hex.starts_with('#')));
+        assert_eq!(mid.tone.len(), 4);
+        assert!(mid.tone.iter().all(|t| (0..=100).contains(&t.value)));
+        let premium = brandbook(food, "premium");
+        assert_ne!(premium.palette[0].hex, mid.palette[0].hex, "premium deepens the main colour");
+        assert_eq!(premium.palette[1].hex, mid.palette[1].hex);
+        assert_eq!(shade("#ffffff", 0.5), "#808080");
+        assert!(SECTORS.iter().all(|x| x.palette.iter().all(|h| u32::from_str_radix(h.trim_start_matches('#'), 16).is_ok())));
+    }
+
+    #[test]
+    fn answers_are_bounded_before_they_are_kept() {
+        let ok = Inputs { advisor: "  دفتر مشاوره  ".into(), logo: "data:image/png;base64,AAAA".into(), ..Default::default() }.sanitized().unwrap();
+        assert_eq!(ok.advisor, "دفتر مشاوره");
+        assert!(Inputs { logo: "https://evil.example/x.png".into(), ..Default::default() }.sanitized().is_err(), "only an inline image");
+        assert!(Inputs { logo: format!("data:image/png;base64,{}", "A".repeat(300_001)), ..Default::default() }.sanitized().is_err());
+        assert!(Inputs { budget: -1, ..Default::default() }.sanitized().is_err());
+        assert_eq!(Inputs { usp: "ا".repeat(900), ..Default::default() }.sanitized().unwrap().usp.chars().count(), 400);
+    }
+
+    #[test]
+    fn sector_rates_differ_like_the_market() {
+        // apparel is returned far more than digital goods; channel fees stay in the 5–18% band
+        let (fashion, digital) = (sector_of("fashion", "", ""), sector_of("electronics", "", ""));
+        assert!(fashion.ret > digital.ret && fashion.fee > digital.fee);
+        assert!(SECTORS.iter().all(|x| (5.0..=18.0).contains(&x.fee) && (2.0..=8.0).contains(&x.ret)), "rates inside the documented band");
+        // the owner's numbers are bounded, not trusted blindly
+        let f = finance(&Inputs { price: 100_000, unit_cost: 50_000, channel_fee_pct: Some(900.0), return_pct: Some(f64::NAN), ..Default::default() }, 0, 0, fashion, "growth");
+        assert_eq!(f.fee_pct, 40.0);
+        assert_eq!(f.return_pct, fashion.ret, "a non-number falls back to the sector's rate");
     }
 
     #[test]

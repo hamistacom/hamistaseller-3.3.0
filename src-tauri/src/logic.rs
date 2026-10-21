@@ -19,7 +19,7 @@ pub fn fa_num(n: f64) -> String {
     let s = int.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).rem_euclid(3) == 0 {
             out.push('٬');
         }
         out.push(c);

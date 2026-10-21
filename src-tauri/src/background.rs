@@ -202,3 +202,29 @@ pub fn scheduler(app: AppHandle) {
         }
     });
 }
+
+/// Every 15 minutes: tell the user (once each) which B2B follow-ups have come due — in the app (event
+/// «follow-ups») and as a system notification, which also works while the window sits in the tray.
+pub fn follow_ups(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+        loop {
+            let st = app.state::<AppState>();
+            match st.db.follow_ups_to_notify() {
+                Ok(due) if !due.is_empty() => {
+                    let names: Vec<String> = due.iter().take(3).map(|d| d.name.clone()).collect();
+                    let more = due.len().saturating_sub(names.len());
+                    let body = format!("{}{}", names.join("، "), if more > 0 { format!(" و {more} مورد دیگر") } else { String::new() });
+                    let _ = app.emit("follow-ups", serde_json::json!({ "count": due.len(), "names": names }));
+                    use tauri_plugin_notification::NotificationExt;
+                    if let Err(e) = app.notification().builder().title("پیگیری مشتری").body(&body).show() {
+                        log_line("WARN", &format!("notification: {e}"));
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => log_line("WARN", &format!("follow-ups: {e}")),
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(15 * 60)).await;
+        }
+    });
+}
