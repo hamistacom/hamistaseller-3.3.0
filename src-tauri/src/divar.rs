@@ -74,25 +74,24 @@ return {
 };
 "#;
 
-// Clicks the Contact tab, accepts any warning modal, AND triggers an authenticated in-page fetch
-// to Divar/Sheypoor's contact API so the phone number is guaranteed to be captured into `window.__hmPhone`.
+// Scrolls the contact button into view and clicks it once like a human, then accepts any warning
+// modal. Divar's own page code then calls its contact API (`contact_info_v2`) and reveals the
+// phone; a direct fetch from injected code is rejected (403 RBAC), so there is no API fallback.
 const TRIGGER_CONTACT_JS: &str = r#"
-const cleanDigits = s => String(s || '')
-  .replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))
-  .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
-
-// 1) Click the main «اطلاعات تماس» / «شماره تماس» button if not clicked yet
 const buttons = [...document.querySelectorAll('button, a[role="button"], div[role="button"]')];
-const contactBtn = buttons.find(b => {
+// the real contact tab first (stable class), then text matches — never the «برو به …» banner
+const contactBtn = document.querySelector('button[class*="get-contact"]') || buttons.find(b => {
   const t = (b.innerText || '').trim();
-  return t.includes('اطلاعات تماس') || t.includes('نمایش شماره') || t.includes('شماره تماس') || t.includes('تماس با آگهی‌دهنده') || t.includes('تماس');
+  return (t === 'اطلاعات تماس' || t.includes('نمایش شماره') || t.includes('شماره تماس') || t.includes('تماس با آگهی‌دهنده')) && !t.startsWith('برو به');
 });
-if (contactBtn && !contactBtn.dataset.hmClicked) {
-  contactBtn.dataset.hmClicked = '1';
-  try { contactBtn.click(); } catch (e) {}
+if (contactBtn) {
+  try { contactBtn.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+  if (!contactBtn.dataset.hmClicked) {
+    contactBtn.dataset.hmClicked = '1';
+    try { contactBtn.click(); } catch (e) {}
+  }
 }
-
-// 2) If a «قوانین / هشدار پلیس / متوجه شدم / تأیید» modal button is open, click it automatically
+// a «قوانین / هشدار / متوجه شدم» modal may sit on top: accept it automatically
 const acceptBtn = buttons.find(b => {
   const t = (b.innerText || '').trim();
   return t === 'تأیید' || t === 'تایید' || t === 'متوجه شدم' || t === 'ادامه' || t === 'قبول' || t.includes('مشاهده اطلاعات تماس');
@@ -101,107 +100,59 @@ if (acceptBtn && !acceptBtn.dataset.hmAccepted) {
   acceptBtn.dataset.hmAccepted = '1';
   try { acceptBtn.click(); } catch (e) {}
 }
-
-// 3) Direct in-browser authenticated fetch to Divar's contact endpoint using the user's active session/token
-if (!window.__hmFetched) {
-  window.__hmFetched = true;
-  window.__hmPhone = '';
-  window.__hmNeedLogin = false;
-  const m = location.pathname.match(/\/v\/([^/?#]+)/);
-  if (m && location.hostname.includes('divar.ir')) {
-    const postToken = decodeURIComponent(m[1]).split('_').pop();
-    let authHeader = {};
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        const v = localStorage.getItem(k) || '';
-        if (/token|auth/i.test(k) && v.length > 20) {
-          const parsed = v.startsWith('{') ? JSON.parse(v) : v;
-          const tok = typeof parsed === 'string' ? parsed : (parsed.token || parsed.access_token || parsed.value || '');
-          if (tok && typeof tok === 'string') {
-            authHeader = { 'Authorization': tok.startsWith('Bearer ') ? tok : ('Bearer ' + tok) };
-            break;
-          }
-        }
-      }
-    } catch (e) {}
-
-    const endpoints = [
-      `https://api.divar.ir/v8/postcontact/web/contact_info/${postToken}`,
-      `https://api.divar.ir/v8/postcontact/web/contact_info_v2/${postToken}`,
-      `https://api.divar.ir/v5/posts/${postToken}/contact/`
-    ];
-    (async () => {
-      for (const ep of endpoints) {
-        try {
-          const r = await fetch(ep, {
-            method: ep.includes('_v2') ? 'POST' : 'GET',
-            credentials: 'include',
-            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', ...authHeader },
-            body: ep.includes('_v2') ? '{}' : undefined
-          });
-          if (r.status === 401 || r.status === 403) {
-            window.__hmNeedLogin = true;
-            continue;
-          }
-          if (!r.ok) continue;
-          const txt = cleanDigits(await r.text());
-          const pm = txt.match(/(?:\+98|0098|0)?(9\d{9})/) || txt.match(/(0[1-8]\d{9})/);
-          if (pm) {
-            window.__hmPhone = pm[0].startsWith('9') ? ('0' + pm[1]) : pm[0];
-            break;
-          }
-        } catch (e) {}
-      }
-    })();
-  }
-}
 return true;
 "#;
 
-// Reads the revealed phone number, ad date, neighbourhood/address, seller name, and description
+// Reads the revealed phone number, ad date, neighbourhood/address, seller name, and description.
+// The phone appears after the contact tab is clicked: as a `tel:` link and/or inside the
+// «شمارهٔ موبایل» row (`kt-unexpandable-row__value-box` / `copyRow…`), in Latin or Persian digits.
 const DETAIL_JS: &str = r#"
 const clean = s => String(s || '').replace(/[\uE000-\uF8FF\u200e\u200f]/g, '').replace(/\s+/g, ' ').trim();
 const latin = s => clean(s).replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
 const body = document.body ? document.body.innerText : '';
 const h1 = document.querySelector('h1');
 
-let phone = window.__hmPhone || '';
+const normPhone = raw => {
+  let d = latin(String(raw || '')).replace(/[^\d]/g, '');
+  if (d.startsWith('0098')) d = '0' + d.slice(4);
+  else if (d.startsWith('98') && d.length === 12) d = '0' + d.slice(2);
+  if (/^9\d{9}$/.test(d)) d = '0' + d;
+  return /^0\d{10}$/.test(d) ? d : '';
+};
 
-// 1) Check `a[href^="tel:"]` anywhere in the document (including modals/portals)
+let phone = '';
+
+// 1) `a[href^="tel:"]` anywhere in the document (including modals/portals) — strongest signal
 if (!phone) {
-  const telLinks = [...document.querySelectorAll('a[href^="tel:"]')];
-  for (const tl of telLinks) {
-    const raw = latin(decodeURIComponent((tl.getAttribute('href') || '').replace(/^tel:/i, '')));
-    const m = raw.match(/(?:\+98|0098|0)?(9\d{9})/) || raw.match(/(0[1-8]\d{9})/);
-    if (m) {
-      phone = m[0].startsWith('9') ? ('0' + m[1]) : m[0];
-      break;
-    }
+  for (const tl of document.querySelectorAll('a[href^="tel:"]')) {
+    const p = normPhone(decodeURIComponent((tl.getAttribute('href') || '').replace(/^tel:/i, '')));
+    if (p) { phone = p; break; }
   }
 }
 
-// 2) Check contact rows («شماره موبایل», «شماره تماس», `.copy-row`, modal dialogs)
+// 2) the revealed contact rows («شمارهٔ موبایل» next to the number)
 if (!phone) {
-  const rows = [...document.querySelectorAll('.copy-row, [class*="contact"], [class*="phone"], [role="dialog"] *, .kt-unexpandable-row, .kt-base-row')];
+  const rows = [...document.querySelectorAll('.kt-unexpandable-row__value-box, [class*="copyRow"], .copy-row, .kt-base-row, [role="dialog"] *')];
   for (const el of rows) {
-    const t = latin(el.innerText || '');
-    if (t.includes('0999') || t.includes('123456')) continue; // skip login input placeholders
-    const m = t.match(/\b(09\d{2}[\s\-]*\d{3}[\s\-]*\d{4})\b/) || t.match(/\b(0[1-8]\d{1,2}[\s\-]*\d{7,8})\b/);
-    if (m) {
-      phone = m[1].replace(/[\s\-]/g, '');
-      break;
-    }
+    const t = latin(el.innerText || '').replace(/[\s\-]/g, '');
+    if (!t || t.length > 200) continue;
+    const m = t.match(/(^|\D)(09\d{9}|0[1-8]\d{9})(\D|$)/);
+    if (m && !m[2].startsWith('0999') && !m[2].includes('123456')) { phone = m[2]; break; }
   }
 }
 
+// 3) the ad text itself as a last resort
+if (!phone) {
+  const m = latin(body).match(/(^|[^\d])(09\d{9})([^\d]|$)/);
+  if (m) phone = m[2];
+}
+
+// a login / OTP dialog means the phone cannot be shown (the user signs in once, in a visible window)
 const loginModal = !!(
-  window.__hmNeedLogin ||
-  document.querySelector('input[type="tel"], input[name*="mobile"], input[placeholder*="موبایل"]') ||
-  body.includes('ورود به حساب کاربری') ||
-  body.includes('شمارهٔ موبایل خود را وارد کنید') ||
+  document.querySelector('input[type="tel"], input[name*="mobile"], input[placeholder*="موبایل"], input[autocomplete="one-time-code"]') ||
+  body.includes('برای مشاهده اطلاعات تماس') ||
   body.includes('کد تأیید را وارد کنید') ||
-  body.includes('برای مشاهده اطلاعات تماس')
+  body.includes('شمارهٔ موبایل خود را وارد کنید')
 );
 
 let seller = '';
@@ -212,21 +163,16 @@ let desc = '';
 const descEl = document.querySelector('.kt-description-row__text, [class*="description"], [class*="Description"], article p');
 if (descEl) desc = clean(descEl.innerText);
 
-// Extract posting date & location subtitle (e.g. «نیم ساعت پیش در تهران، سعادت‌آباد»)
+// posting date & neighbourhood from the line «۱ ساعت پیش در تهران، آشتیانی»
 let adDate = '';
 let address = '';
-const subEl = document.querySelector('.kt-page-title__subtitle, [class*="subtitle"], [class*="location"]');
-const subText = clean(subEl ? subEl.innerText : '');
-if (subText) {
-  if (subText.includes(' در ')) {
-    const parts = subText.split(' در ');
-    adDate = clean(parts[0]);
-    address = clean(parts.slice(1).join('، '));
-  } else {
-    address = subText;
-  }
+const line = body.split('\n').map(s => s.trim()).find(l => l.includes(' پیش در ') && l.length < 140) || '';
+if (line) {
+  const i = line.indexOf(' پیش در ');
+  adDate = clean(line.slice(0, i));
+  address = clean(line.slice(i + 8));
 }
-// Also check structured rows for «محله» or «آدرس»
+// also structured rows for «محله» / «منطقه» / «آدرس»
 for (const r of document.querySelectorAll('.kt-unexpandable-row, .kt-base-row')) {
   const rt = clean(r.innerText);
   if ((rt.startsWith('محله') || rt.startsWith('منطقه') || rt.startsWith('آدرس')) && rt.length < 120) {
@@ -459,17 +405,18 @@ async fn run_platform(
             status(emit, format!("دریافت اطلاعات تماس: {}", ad.title));
             goto(&eng.workers[0], &ad.href).await;
 
-            // Calm, structured polling: trigger contact tab & API, then wait for phone reveal
+            // Calm, human-like polling: let the page settle, click the contact tab (idempotent),
+            // then wait for the phone to be revealed — without ever reloading the page
             let mut detail = AdDetail::default();
             for step in 0..8 {
                 tokio::select! {
-                    _ = sleep(Duration::from_millis(if step == 0 { 1600 } else { 950 })) => {}
+                    _ = sleep(Duration::from_millis(if step == 0 { 2600 } else { 1300 })) => {}
                     _ = token.cancelled() => break,
                 }
                 let _ = js::<bool>(&eng.workers[0], TRIGGER_CONTACT_JS).await;
                 if let Ok(d) = js::<AdDetail>(&eng.workers[0], DETAIL_JS).await {
                     detail = d;
-                    if !detail.phone.is_empty() || (detail.ready && step >= 5) {
+                    if !detail.phone.is_empty() || (detail.ready && step >= 6) {
                         break;
                     }
                 }
@@ -606,8 +553,8 @@ async fn run_platform(
                 target: limit as i64,
             });
 
-            // Calm, human-like pacing (2.2s – 4.2s) so Divar never rate-limits the account's contact tab
-            let wait_ms = jitter(s.delay_ms.max(2200), (s.delay_ms * 4).max(4200));
+            // Calm, human-like pacing (2.6s – 5.2s) so Divar never rate-limits the contact tab
+            let wait_ms = jitter(s.delay_ms.max(2600), (s.delay_ms * 4).max(5200));
             tokio::select! {
                 _ = sleep(Duration::from_millis(wait_ms)) => {}
                 _ = token.cancelled() => break,

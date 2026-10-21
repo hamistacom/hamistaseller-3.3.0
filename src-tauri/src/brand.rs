@@ -362,24 +362,56 @@ pub fn parse_counts(desc: &str) -> (Option<i64>, Option<i64>) {
     (grab(&["followers", "دنبال"]), grab(&["posts", "پست"]))
 }
 
-pub async fn read_instagram(handle: &str) -> Social {
+/// Reads a public Instagram business profile. The plain HTTP fetch keeps working wherever
+/// Instagram is reachable directly; when it is filtered (empty/blocked answer), the profile is
+/// opened once in the app's own browser — which goes through the user's system proxy/VPN — and
+/// the public `og:description` ("1,234 Followers, 567 Following, 89 Posts") is read from the DOM.
+pub async fn read_instagram(s: &crate::scanner::Settings, profile: &std::path::Path, handle: &str) -> Social {
     let h = handle.trim().trim_start_matches('@');
-    let mut s = Social {
+    let mut soc = Social {
         handle: h.to_string(),
         ..Default::default()
     };
     if h.is_empty() {
-        return s;
+        return soc;
     }
     if let Ok(r) = http().get(format!("https://www.instagram.com/{h}/")).send().await {
         let body = r.text().await.unwrap_or_default();
         if let Some(desc) = crate::logic::meta_content(&body, "og:description").or_else(|| crate::logic::meta_content(&body, "description")) {
             let (f, p) = parse_counts(&desc);
-            s.followers = f;
-            s.posts = p;
+            soc.followers = f;
+            soc.posts = p;
         }
     }
-    s
+    if soc.followers.is_some() || h.is_empty() {
+        return soc;
+    }
+    // filtered or bot-blocked: read the profile once in the app's browser (system proxy applies)
+    const IG_JS: &str = r#"
+const m = document.querySelector('meta[property="og:description"]') || document.querySelector('meta[name="description"]');
+return { desc: m ? (m.getAttribute('content') || '') : '', title: document.title || '' };
+"#;
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Ig0 {
+        desc: String,
+        title: String,
+    }
+    if let Ok(eng) = crate::scanner::launch(s, profile, s.headless, 0).await {
+        crate::scanner::goto(&eng.list, &format!("https://www.instagram.com/{h}/")).await;
+        tokio::time::sleep(Duration::from_millis(4000)).await;
+        if let Ok(ig) = crate::scanner::js::<Ig0>(&eng.list, IG_JS).await {
+            for text in [ig.desc, ig.title] {
+                if soc.followers.is_none() && !text.is_empty() {
+                    let (f, p) = parse_counts(&text);
+                    soc.followers = f.or(soc.followers);
+                    soc.posts = p.or(soc.posts);
+                }
+            }
+        }
+        crate::scanner::shut(Some(eng)).await;
+    }
+    soc
 }
 
 /// This brand's place in the saved product searches (the latest one per product).
@@ -979,67 +1011,63 @@ pub async fn analyze(
         nb.instagram = handle.clone();
         let _ = db.brand_save(&nb);
     }
-    // live market: the category as a whole (share, competitors) and the brand's own products
+    // live market: the category as a whole (share, competitors) and the brand's own products —
+    // failures are shown to the user instead of silently producing an empty analysis
     let base = crate::market::MarketReq {
         platforms: vec!["torob".into(), "digikala".into(), "basalam".into()],
         limit: 60,
         ..Default::default()
     };
+    let run_market = |req: crate::market::MarketReq, what: String| async move {
+        match crate::market::search(db, s, profile, &req, token, emit).await {
+            Ok(r) => Some(r),
+            Err(e) if !token.is_cancelled() => {
+                crate::scanner::log(emit, "warning", format!("{what}: {e}"));
+                None
+            }
+            Err(_) => None,
+        }
+    };
     let category = if b.category.trim().is_empty() || token.is_cancelled() {
         None
     } else {
-        crate::market::search(
-            db,
-            s,
-            profile,
-            &crate::market::MarketReq {
+        run_market(
+            crate::market::MarketReq {
                 query: b.category.trim().into(),
                 ..base.clone()
             },
-            token,
-            emit,
+            format!("تحلیل بازار دسته «{}»", b.category.trim()),
         )
         .await
-        .ok()
     };
     let mine = if token.is_cancelled() {
         None
     } else if b.category.trim().is_empty() {
-        crate::market::search(
-            db,
-            s,
-            profile,
-            &crate::market::MarketReq {
+        run_market(
+            crate::market::MarketReq {
                 query: b.name.trim().into(),
                 exact: false,
                 ..base.clone()
             },
-            token,
-            emit,
+            format!("تحلیل بازار «{}»", b.name.trim()),
         )
         .await
-        .ok()
     } else {
-        crate::market::search(
-            db,
-            s,
-            profile,
-            &crate::market::MarketReq {
+        run_market(
+            crate::market::MarketReq {
                 query: b.category.trim().into(),
                 brand: b.name.trim().into(),
                 ..base.clone()
             },
-            token,
-            emit,
+            format!("تحلیل فروش برند «{}»", b.name.trim()),
         )
         .await
-        .ok()
     };
     crate::scanner::status(emit, "بررسی سایت و صفحه اینستاگرام…");
     let runs = db.market_recent(60)?;
     let m = market_of(&b.name, &b.category, &runs);
     let site = if site_url.is_empty() { Site::default() } else { audit_site(&site_url).await };
-    let insta = read_instagram(&handle).await;
+    let insta = read_instagram(s, profile, &handle).await;
     let mut r = score(m, site, insta, !site_url.is_empty());
     r.found_site = found_site;
     r.found_instagram = found_instagram;

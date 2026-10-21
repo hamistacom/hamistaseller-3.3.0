@@ -513,8 +513,8 @@ pub fn relevance(query: &str, title: &str, url: &str) -> i64 {
 }
 
 fn client() -> reqwest::Client {
+    // follows the system proxy (VPN): web results are often on sites that need the user's proxy
     reqwest::Client::builder()
-        .no_proxy()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36")
         .connect_timeout(Duration::from_secs(8))
         .timeout(Duration::from_secs(20))
