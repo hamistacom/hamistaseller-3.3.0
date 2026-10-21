@@ -71,8 +71,8 @@ pub const SOURCES: &[Source] = &[
     },
     Source {
         id: "telegram",
-        name: "کانال‌های عمومی تلگرام",
-        desc: "کانال‌های عمومی کسب‌وکارها بر اساس موضوع به همراه تعداد عضو و اطلاعات تماس بیو",
+        name: "کانال‌ها و گروه‌های عمومی تلگرام",
+        desc: "کانال‌ها و گروه‌های عمومی کسب‌وکارها بر اساس موضوع، با تعداد عضو، آیدی ادمین و اطلاعات تماس بیو",
         icon: "telegram",
         kind: "scan",
         ready: true,
@@ -207,7 +207,12 @@ pub fn config_status(db: &Db, id: &str) -> Map<String, Value> {
 // ---------------- saving a found business ----------------
 
 pub fn save(db: &Db, emit: Emit<'_>, mut place: Place, c: &Contacts, origin: &str, labels: &[(&str, String)]) -> bool {
-    if !c.has_any() {
+    // a phone / e-mail, or a messenger id other than the page itself (Telegram/Instagram admin)
+    let page = place.maps_url.trim_end_matches('/');
+    let messenger = [&c.telegram, &c.whatsapp, &c.eitaa, &c.bale, &c.instagram]
+        .iter()
+        .any(|v| !v.is_empty() && v.trim_end_matches('/') != page);
+    if !c.has_any() && !messenger {
         let _ = db.insert_place(&place);
         scanner::log(emit, "muted", format!("{} — راه ارتباطی عمومی نداشت", place.name));
         return false;
@@ -366,28 +371,32 @@ pub async fn run_search(db: &Db, s: &Settings, profile: &Path, req: &ScanRequest
         return Err("حداقل یک کلمه کلیدی وارد کنید.".into());
     }
 
-    // Interactive login mode for Instagram in the browser
-    if source == "instagram" && keywords.len() == 1 && keywords[0] == "__login__" {
-        scanner::status(emit, "باز کردن پنجره مرورگر برای ورود به حساب اینستاگرام…");
+    // Interactive sign-in (Instagram / Telegram web) in a visible window; the session stays in the
+    // app's browser profile, so later extractions read pages as the signed-in user
+    if matches!(source, "instagram" | "telegram") && keywords.len() == 1 && keywords[0] == "__login__" {
+        let (label, url) = if source == "telegram" {
+            ("تلگرام", "https://web.telegram.org/k/")
+        } else {
+            ("اینستاگرام", "https://www.instagram.com/accounts/login/")
+        };
+        scanner::status(emit, format!("باز کردن پنجره مرورگر برای ورود به حساب {label}…"));
+        scanner::clear_wait_skip();
         let mut eng = scanner::launch(s, profile, false, 0).await?;
-        scanner::goto(&eng.list, "https://www.instagram.com/accounts/login/").await;
+        scanner::goto(&eng.list, url).await;
         emit(ScanEvent::Captcha {
-            message: "پنجره مرورگر باز شد. لطفاً وارد حساب اینستاگرام خود شوید و پس از ورود، پنجره را ببندید تا نشست شما ذخیره شود.".into(),
+            message: format!("پنجره مرورگر باز شد. وارد حساب {label} شوید و پس از ورود، پنجره را ببندید (یا «رد کردن و ادامه» را بزنید) تا نشست ذخیره شود. اگر صفحه سفید ماند، VPN/پروکسی سیستم را روشن کنید و صفحه را تازه کنید."),
         });
         let deadline = Instant::now() + Duration::from_secs(600);
         while Instant::now() < deadline && !token.is_cancelled() {
-            if !eng.alive.load(std::sync::atomic::Ordering::Relaxed) || eng.proc.exited() {
+            if scanner::take_wait_skip() || !eng.alive.load(std::sync::atomic::Ordering::Relaxed) || eng.proc.exited() {
                 break;
             }
             sleep(Duration::from_secs(1)).await;
         }
         scanner::shut(Some(eng)).await;
         return Ok(Summary {
-            checked: 0,
-            found: 0,
-            cancelled: false,
-            error: false,
-            message: "نشست حساب اینستاگرام ذخیره شد. اکنون می‌توانید استخراج را شروع کنید.".into(),
+            message: format!("نشست حساب {label} ذخیره شد. اکنون می‌توانید استخراج را شروع کنید."),
+            ..Default::default()
         });
     }
 

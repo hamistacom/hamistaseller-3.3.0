@@ -77,19 +77,20 @@ export async function openCard(id, { onChange } = {}) {
   const p = await safe(invoke("place", { id }));
   if (!p) return;
   const isAd = p.source === "divar" || p.source === "sheypoor" || (p.mapsUrl && (p.mapsUrl.includes("divar.ir") || p.mapsUrl.includes("sheypoor.com")));
+  const isPage = p.source === "telegram" || p.source === "instagram";
   const status = select(Object.entries(STATUS).map(([k, v]) => [k, v.label]), p.status, { class: "input" });
   const note = h("textarea", { class: "input", rows: 2, placeholder: "یادداشت پیگیری (مثلاً: قرار تماس دوشنبه)" }, p.note);
   const contacts = [...p.contacts, ...(p.website ? [{ id: 0, kind: "website", value: p.website }] : [])];
   const rows = [
     ["آدرس / محدوده", p.address],
     [
-      isAd ? "لینک آگهی" : "لینک نقشه",
+      isAd ? "لینک آگهی" : isPage ? "لینک کانال / پیج" : "لینک نقشه",
       p.mapsUrl
         ? h(
             "button",
             { class: "link small ltr", type: "button", onclick: () => safe(invoke("open_url", { url: p.mapsUrl })) },
             icon("external", "sm"),
-            isAd ? "مشاهده صفحه آگهی" : "مشاهده روی نقشه",
+            isAd ? "مشاهده صفحه آگهی" : isPage ? "باز کردن کانال / پیج" : "مشاهده روی نقشه",
           )
         : "",
     ],
@@ -125,8 +126,8 @@ export async function openCard(id, { onChange } = {}) {
             ? h(
                 "button",
                 { class: "link small", type: "button", onclick: () => safe(invoke("open_url", { url: p.mapsUrl })) },
-                icon(isAd ? "external" : "map", "sm"),
-                isAd ? "مشاهده آگهی" : "روی نقشه",
+                icon(isAd || isPage ? "external" : "map", "sm"),
+                isAd ? "مشاهده آگهی" : isPage ? "کانال / پیج" : "روی نقشه",
               )
             : null,
         ),

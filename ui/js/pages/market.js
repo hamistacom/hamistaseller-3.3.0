@@ -1,7 +1,7 @@
 // «تحلیل محصول»: one product search across Iranian shops and classifieds → market prices, a
 // suggested selling price (seller mode) or the best place to buy (buyer mode), brands, sales
 // channels, related searches, price history and every offer with its photo.
-import { h, icon, invoke, fa, clear, safe, input, field, toast, modal, newChannel, jdate, ago, confirmBox, select, copy } from "../core.js";
+import { h, icon, invoke, fa, clear, safe, input, field, toast, modal, newChannel, jdate, ago, confirmBox, select, copy, skipWaitButton } from "../core.js";
 import { refreshLists, go } from "../state.js";
 import { runJob } from "../jobs.js";
 import { hero, photoCards, productPhoto } from "../photos.js";
@@ -565,14 +565,20 @@ export async function render(root, params, actions) {
     const track = h("div", { class: "bar" }, h("i"));
     const log = h("div", { class: "small muted mkt-log" });
     const stop = h("button", { class: "btn sm danger", type: "button", onclick: (e) => { e.currentTarget.disabled = true; safe(invoke("job_stop", {})); } }, icon("stop", "sm"), "توقف");
-    clear(progress, h("div", { class: "row between" }, line, stop), track, log);
+    const waitBox = h("div", { class: "callout compact row", hidden: true });
+    clear(progress, h("div", { class: "row between" }, line, stop), waitBox, track, log);
     const ch = newChannel();
     ch.onmessage = (e) => {
-      if (e.type === "status") line.textContent = e.message;
+      if (e.type === "status") {
+        line.textContent = e.message;
+        waitBox.hidden = true;
+      }
       if (e.type === "progress") track.firstChild.style.width = `${(100 * e.checked) / Math.max(1, e.target)}%`;
       if (e.type === "log") log.append(h("div", { class: e.level }, e.message));
       if (e.type === "captcha") {
-        line.textContent = e.message;
+        // never stuck on one source (e.g. Torob's «I'm not a robot»): skip it and go on with the rest
+        clear(waitBox, icon("alert", "sm"), h("span", { class: "small grow" }, e.message), skipWaitButton());
+        waitBox.hidden = false;
         toast(e.message, "ok");
       }
     };

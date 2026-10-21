@@ -292,6 +292,13 @@ pub async fn scan_resume(app: AppHandle, state: State<'_, AppState>, run_id: i64
     scan(app, state, req, on_event, Some(run_id)).await
 }
 
+/// «رد کردن و ادامه»: ends the current captcha / sign-in wait; that source is skipped and the job goes on.
+#[tauri::command]
+pub async fn wait_skip() -> Res<()> {
+    scanner::trigger_wait_skip();
+    Ok(())
+}
+
 /// Path of the Edge / Chrome the scanner will use (`custom` first), or null.
 #[tauri::command]
 pub async fn browser_detect(custom: String) -> Res<Option<String>> {

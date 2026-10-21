@@ -320,6 +320,7 @@ fn main() {
             commands::scan_start,
             commands::scan_resume,
             commands::browser_detect,
+            commands::wait_skip,
             commands::campaign_run,
             commands::template_preview,
             commands::assist_open,

@@ -2,7 +2,7 @@
 // watch, logins) reported by the backend job manager, shown in one floating drawer at the bottom-left
 // corner — on every page, never lost on scroll or route change. Fed by the `job-update` event and a
 // one-time `jobs_list` snapshot; each operation can be stopped on its own.
-import { invoke, listen, fa, h, clear, icon } from "./core.js";
+import { invoke, listen, fa, h, clear, icon, skipWaitButton } from "./core.js";
 
 const ops = new Map(); // id -> JobInfo
 const listeners = new Set();
@@ -83,6 +83,7 @@ function opRow(o, expanded) {
         : h("span", { class: "op-state" }, LABEL[o.state]),
     ),
     expanded || isActive(o) ? h("div", { class: "op-sub", title: sub }, sub) : null,
+    o.state === "waiting_for_user" ? h("div", { class: "op-meta" }, skipWaitButton()) : null,
     (expanded || isActive(o)) && (p !== null || o.found > 0)
       ? h("div", { class: "op-meta" }, p !== null ? h("span", {}, bar) : h("span", { class: "grow" }), o.found > 0 ? h("span", { class: "op-found" }, `${fa(o.found)} مورد`) : null)
       : null,

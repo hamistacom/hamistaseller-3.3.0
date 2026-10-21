@@ -182,7 +182,12 @@ pub async fn read_with_page(http: &reqwest::Client, api: Option<&Api>, page: Opt
         return Ok(None);
     }
 
+    // the admin / shop id written in the bio («سفارش در دایرکت @shop_admin», «t.me/…»)
+    for m in crate::logic::mentions_in_text(&bio).into_iter().filter(|m| !m.eq_ignore_ascii_case(&handle)) {
+        c.add_link(&format!("https://instagram.com/{m}"));
+    }
     c.add_link(&format!("https://instagram.com/{handle}"));
+    place.maps_url = format!("https://instagram.com/{handle}"); // the page itself, one click away
     place.name = if name.is_empty() { format!("@{handle}") } else { name };
     let labels = followers.map(|f| vec![("instagram", format!("{f} دنبال‌کننده"))]).unwrap_or_default();
     Ok(Some((place, c, labels)))

@@ -263,6 +263,7 @@ async fn run_platform(
     // Interactive login mode triggered by the login button in the UI
     if keywords.len() == 1 && keywords[0] == "__login__" {
         status(emit, format!("باز کردن پنجره مرورگر برای ورود به حساب {source_label}…"));
+        crate::scanner::clear_wait_skip();
         let mut eng = launch(s, profile, false, 0).await?;
         goto(&eng.list, login_url).await;
         emit(ScanEvent::Captcha {
@@ -272,7 +273,7 @@ async fn run_platform(
         });
         let deadline = Instant::now() + Duration::from_secs(600);
         while Instant::now() < deadline && !token.is_cancelled() {
-            if !eng.alive.load(Relaxed) || eng.proc.exited() {
+            if crate::scanner::take_wait_skip() || !eng.alive.load(Relaxed) || eng.proc.exited() {
                 break;
             }
             sleep(Duration::from_secs(1)).await;
@@ -425,6 +426,7 @@ async fn run_platform(
             // If login or captcha is required to see the phone number, open a visible browser window once
             if (detail.needs_login || detail.blocked) && detail.phone.is_empty() && !login_prompted && !token.is_cancelled() {
                 login_prompted = true;
+                crate::scanner::clear_wait_skip();
                 emit(ScanEvent::Captcha {
                     message: format!(
                         "برای نمایش شماره‌های بخش «اطلاعات تماس» در {source_label}، پنجره مرورگر باز شد. لطفاً وارد حساب خود شوید یا تأیید را بزنید؛ به محض نمایش شماره، استخراج آرام و خودکار ادامه می‌یابد."
@@ -435,7 +437,7 @@ async fn run_platform(
                 goto(&eng.workers[0], &ad.href).await;
 
                 for _ in 0..75 {
-                    if token.is_cancelled() || !eng.alive.load(Relaxed) || eng.proc.exited() {
+                    if token.is_cancelled() || crate::scanner::take_wait_skip() || !eng.alive.load(Relaxed) || eng.proc.exited() {
                         break;
                     }
                     sleep(Duration::from_secs(2)).await;

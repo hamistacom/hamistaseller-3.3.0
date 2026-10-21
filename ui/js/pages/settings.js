@@ -465,9 +465,9 @@ const MODULE_NOTES = {
   neshan: "فهرست کسب‌وکارهای نشان + یافتن شماره هر کدام در گوگل‌مپ.",
   balad: "صفحه‌های عمومی کسب‌وکارها در بلد، از طریق جستجوی وب.",
   instagram: "پیج‌های کسب‌وکاری، از طریق جستجوی وب و نشست مرورگر.",
-  telegram: "فقط کانال‌های عمومی؛ گروه‌ها و حساب‌های شخصی کنار گذاشته می‌شوند.",
+  telegram: "کانال‌ها و گروه‌های عمومی با آیدی ادمین و راه تماس؛ حساب‌های شخصی کنار گذاشته می‌شوند.",
 };
-const LOGIN_SOURCES = new Set(["divar", "sheypoor", "instagram"]);
+const LOGIN_SOURCES = new Set(["divar", "sheypoor", "instagram", "telegram"]);
 
 function moduleConfig(m, redraw) {
   const spec = MODULE_FIELDS[m.id];

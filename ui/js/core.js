@@ -419,3 +419,22 @@ export const bar = (ratio, tone = "") => {
   setBar(b, ratio);
   return b;
 };
+
+/** «رد کردن و ادامه»: ends the current captcha / sign-in wait — that source is skipped and the job goes on. */
+export function skipWaitButton(label = "رد کردن و ادامه") {
+  const b = h(
+    "button",
+    {
+      class: "btn sm tonal",
+      type: "button",
+      title: "این منبع رد می‌شود و عملیات با منابع بعدی ادامه پیدا می‌کند",
+      onclick: () => {
+        b.disabled = true;
+        invoke("wait_skip").catch(() => {});
+      },
+    },
+    icon("skip", "sm"),
+    label,
+  );
+  return b;
+}

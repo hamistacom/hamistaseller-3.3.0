@@ -322,6 +322,8 @@ pub(crate) async fn js<T: DeserializeOwned>(page: &Page, body: &str) -> Res<T> {
 
 /// Navigation errors/timeouts are ignored on purpose: callers poll the DOM with their own deadline.
 pub(crate) async fn goto(page: &Page, url: &str) {
+    // a visible window shows the tab being used, never a blank one (sign-in / captcha windows)
+    let _ = page.bring_to_front().await;
     let _ = tokio::time::timeout(Duration::from_secs(15), page.goto(url)).await;
 }
 
@@ -609,6 +611,15 @@ async fn launch_in(exe: &str, profile: &Path, headless: bool, tabs: usize) -> Re
     let mut workers = vec![];
     for _ in 0..tabs {
         workers.push(new_tab(&browser, &ua).await?);
+    }
+    if !headless {
+        // the start-up tab stays blank forever: close it (`goto` brings the tab being used to the front)
+        let ours: Vec<_> = std::iter::once(&list).chain(&workers).map(|p| p.target_id().clone()).collect();
+        if let Ok(pages) = browser.pages().await {
+            for p in pages.into_iter().filter(|p| !ours.contains(p.target_id())) {
+                let _ = p.close().await;
+            }
+        }
     }
     Ok(Engine {
         browser,

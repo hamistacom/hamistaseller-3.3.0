@@ -163,7 +163,7 @@ fn uddg(href: &str) -> String {
     href.to_string()
 }
 
-const VERIFY: &str = "موتور جستجو تأیید «ربات نیستم» خواست. یک پنجره مرورگر باز شد؛ تأیید را در آن انجام دهید تا کار خودکار ادامه پیدا کند.";
+const VERIFY: &str = "موتور جستجو تأیید «ربات نیستم» خواست. یک پنجره مرورگر باز شد؛ تأیید را در آن انجام دهید تا کار خودکار ادامه پیدا کند، یا «رد کردن و ادامه» را بزنید.";
 
 /// `search`, and when the engine asks «are you a robot», a visible window for the user to pass
 /// the check (10 minutes at most) — the results are then read from that window.
@@ -180,6 +180,7 @@ pub async fn search_attended(
         Err(e) if e.contains("ربات") => {}
         other => return other,
     }
+    crate::scanner::clear_wait_skip();
     emit(crate::scanner::ScanEvent::Captcha { message: VERIFY.into() });
     let mut eng = crate::scanner::launch(s, profile, false, 0).await?;
     goto(&eng.list, &search_url(query, 1)).await;
@@ -189,7 +190,7 @@ pub async fn search_attended(
             _ = sleep(Duration::from_secs(2)) => {}
             _ = token.cancelled() => break false,
         }
-        if eng.proc.exited() || !eng.alive.load(std::sync::atomic::Ordering::Relaxed) || Instant::now() > deadline {
+        if crate::scanner::take_wait_skip() || eng.proc.exited() || !eng.alive.load(std::sync::atomic::Ordering::Relaxed) || Instant::now() > deadline {
             break false;
         }
         let r: Page0 = js(&eng.list, &script("searchJs", SEARCH_JS)).await.unwrap_or_default();
@@ -200,7 +201,7 @@ pub async fn search_attended(
     let out = if solved {
         search(&eng.list, query, pages, token).await
     } else {
-        Err("تأیید «ربات نیستم» انجام نشد؛ پنجره بسته شد یا ۱۰ دقیقه گذشت.".into())
+        Err("جستجوی وب رد شد (تأیید «ربات نیستم» انجام نشد، پنجره بسته شد یا «رد کردن و ادامه» زده شد).".into())
     };
     crate::scanner::shut(Some(eng)).await;
     out

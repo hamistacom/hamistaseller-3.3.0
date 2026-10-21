@@ -125,7 +125,7 @@ export async function render(root, params, actions) {
           onclick: () => {
             skipBtn.disabled = true;
             line.textContent = `«${b?.name}»: در حال عبور از این مرحله و ادامه…`;
-            invoke("browser_detect", { custom: "__skip_wait__" }).catch(() => {});
+            invoke("wait_skip").catch(() => {});
           },
         },
         icon("skip", "sm"),
