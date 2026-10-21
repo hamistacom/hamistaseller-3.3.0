@@ -50,6 +50,75 @@ pub async fn enrich(http: &reqwest::Client, c: &mut Contacts) {
     }
 }
 
+const AVATAR_EXT: [(&str, &str); 4] = [("image/jpeg", "jpg"), ("image/png", "png"), ("image/webp", "webp"), ("image/gif", "gif")];
+
+/// Where a business picture lives on disk: `cache/avatars/<sha256 of its address>.<ext>`.
+fn avatar_file(dir: &std::path::Path, url: &str, ext: &str) -> std::path::PathBuf {
+    use sha2::{Digest, Sha256};
+    let hash: String = Sha256::digest(url.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
+    dir.join(format!("{hash}.{ext}"))
+}
+
+/// A picture saved earlier by `avatar_data_url`, as a data: URL (None = not cached yet).
+fn avatar_cached(dir: &std::path::Path, url: &str) -> Option<String> {
+    AVATAR_EXT.iter().find_map(|(mime, ext)| {
+        let bytes = std::fs::read(avatar_file(dir, url, ext)).ok()?;
+        Some(format!("data:{mime};base64,{}", b64_std(&bytes)))
+    })
+}
+
+/// A business picture for the card. The database keeps only the address (`places.photo`); the picture
+/// itself is downloaded once into `cache/avatars` and served from there afterwards, so it also works
+/// offline and never grows `hamista.db` or its daily backup. A value that already is a `data:image`
+/// URL (older data) is returned as it is.
+pub async fn avatar_data_url(dir: &std::path::Path, url: &str) -> crate::db::Res<String> {
+    if url.starts_with("data:image") {
+        return Ok(url.to_string());
+    }
+    if let Some(hit) = avatar_cached(dir, url) {
+        return Ok(hit);
+    }
+    let data = image_data_url(url).await?;
+    // "data:<mime>;base64,<body>" → bytes on disk
+    if let Some((head, body)) = data.split_once(";base64,") {
+        let mime = head.trim_start_matches("data:");
+        if let (Some((_, ext)), Some(bytes)) = (AVATAR_EXT.iter().find(|(m, _)| *m == mime), b64_decode(body)) {
+            let _ = std::fs::create_dir_all(dir);
+            let _ = std::fs::write(avatar_file(dir, url, ext), bytes);
+        }
+    }
+    Ok(data)
+}
+
+fn b64_decode(s: &str) -> Option<Vec<u8>> {
+    let val = |c: u8| -> Option<u32> {
+        Some(match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        } as u32)
+    };
+    let raw: Vec<u8> = s.bytes().filter(|c| *c != b'=').collect();
+    let mut out = Vec::with_capacity(raw.len() * 3 / 4);
+    for chunk in raw.chunks(4) {
+        let mut n = 0u32;
+        for (i, c) in chunk.iter().enumerate() {
+            n |= val(*c)? << (18 - 6 * i);
+        }
+        let take = match chunk.len() {
+            4 => 3,
+            3 => 2,
+            2 => 1,
+            _ => return None,
+        };
+        out.extend_from_slice(&n.to_be_bytes()[1..1 + take]);
+    }
+    Some(out)
+}
+
 /// Downloads a small picture (≤ 3 MB, image/* only) and returns it as a data: URL for the UI.
 pub async fn image_data_url(url: &str) -> crate::db::Res<String> {
     const MAX: usize = 3 * 1024 * 1024;
@@ -84,6 +153,23 @@ fn b64_std(data: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn base64_roundtrip_and_avatar_cache() {
+        for sample in [&b"M"[..], b"Ma", b"Man", b"\x00\xff\x10 image bytes"] {
+            assert_eq!(super::b64_decode(&super::b64_std(sample)).unwrap(), sample);
+        }
+        let dir = std::env::temp_dir().join(format!("hs-avatars-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let url = "https://lh5.googleusercontent.com/p/x=w408";
+        assert!(super::avatar_cached(&dir, url).is_none(), "nothing cached yet");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(super::avatar_file(&dir, url, "png"), b"\x89PNG").unwrap();
+        let hit = super::avatar_cached(&dir, url).unwrap();
+        assert!(hit.starts_with("data:image/png;base64,"), "{hit}");
+        assert!(super::avatar_cached(&dir, "https://other/x.jpg").is_none(), "keyed by address");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn std_base64() {
         assert_eq!(super::b64_std(b"Man"), "TWFu");

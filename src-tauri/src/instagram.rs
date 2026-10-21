@@ -11,7 +11,7 @@ use crate::websearch::Hit;
 use chromiumoxide::Page;
 use serde::Deserialize;
 use serde_json::Value;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::time::sleep;
 
 const RESERVED: &[&str] = &[
@@ -118,13 +118,9 @@ return {
 
 pub type Found = (Place, Contacts, Vec<(&'static str, String)>);
 
-pub async fn read(http: &reqwest::Client, api: Option<&Api>, hit: &Hit, place: Place) -> Res<Option<Found>> {
-    read_with_page(http, api, None, hit, place).await
-}
-
 pub async fn read_with_page(http: &reqwest::Client, api: Option<&Api>, page: Option<&Page>, hit: &Hit, mut place: Place) -> Res<Option<Found>> {
     let Some(handle) = handle_of(&hit.url) else { return Ok(None) };
-    let (mut name, mut bio, mut website, mut followers) = match api {
+    let (mut name, mut bio, website, mut followers) = match api {
         Some(api) => match api.discover(http, &handle).await? {
             Some(b) => (
                 b["name"].as_str().unwrap_or_default().to_string(),
@@ -159,7 +155,6 @@ pub async fn read_with_page(http: &reqwest::Client, api: Option<&Api>, page: Opt
                     links_in_text(&combined).iter().for_each(|ln| c.add_link(ln));
                     if !dom.website.is_empty() {
                         c.add_link(&dom.website);
-                        website = dom.website;
                     }
                     if name.is_empty() && !dom.name.is_empty() {
                         name = dom.name;
@@ -182,15 +177,83 @@ pub async fn read_with_page(http: &reqwest::Client, api: Option<&Api>, page: Opt
         return Ok(None);
     }
 
+    // the admin / shop id written in the bio («سفارش در دایرکت @shop_admin», «t.me/…»)
+    for m in crate::logic::mentions_in_text(&bio).into_iter().filter(|m| !m.eq_ignore_ascii_case(&handle)) {
+        c.add_link(&format!("https://instagram.com/{m}"));
+    }
     c.add_link(&format!("https://instagram.com/{handle}"));
+    place.maps_url = format!("https://instagram.com/{handle}"); // the page itself, one click away
     place.name = if name.is_empty() { format!("@{handle}") } else { name };
     let labels = followers.map(|f| vec![("instagram", format!("{f} دنبال‌کننده"))]).unwrap_or_default();
     Ok(Some((place, c, labels)))
 }
 
+// ---------------- Instagram's own search (signed-in session) ----------------
+
+/// The accounts of an Instagram `topsearch` answer, as search hits. Private accounts are left out (their
+/// bio cannot be read anyway); whether the rest is a business is decided later, from the bio (pure).
+pub fn topsearch_hits(v: &serde_json::Value) -> Vec<Hit> {
+    v["users"]
+        .as_array()
+        .map(|a| a.as_slice())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|u| {
+            let u = &u["user"];
+            let name = u["username"].as_str()?;
+            (!u["is_private"].as_bool().unwrap_or(false) && handle_of(&format!("https://www.instagram.com/{name}/")).is_some()).then(|| Hit {
+                url: format!("https://www.instagram.com/{name}/"),
+                title: u["full_name"].as_str().unwrap_or_default().to_string(),
+                snippet: String::new(),
+            })
+        })
+        .collect()
+}
+
+/// Asks Instagram's own search, with the user's saved sign-in (the request is made from the signed-in page,
+/// so nothing leaves the app's browser). Err when not signed in; the caller then uses the web search.
+pub async fn search(page: &Page, query: &str, token: &tokio_util::sync::CancellationToken) -> Res<Vec<Hit>> {
+    goto(page, "https://www.instagram.com/").await;
+    sleep(Duration::from_millis(1500)).await;
+    let q = crate::logic::pct_encode(query.trim());
+    let start = format!(
+        "window.__hs = null; fetch('/web/search/topsearch/?context=blended&include_reel=false&query={q}', {{ credentials: 'include', headers: {{ 'x-ig-app-id': '936619743392459' }} }}).then(r => r.text()).then(t => {{ try {{ window.__hs = JSON.parse(t); }} catch (e) {{ window.__hs = {{ login: true }}; }} }}).catch(() => {{ window.__hs = {{ error: true }}; }}); return 1;"
+    );
+    js::<i32>(page, &start).await?;
+    let t = Instant::now();
+    loop {
+        if token.is_cancelled() || t.elapsed() > Duration::from_secs(15) {
+            return Err("جستجوی اینستاگرام پاسخ نداد.".into());
+        }
+        let v: serde_json::Value = js(page, "return window.__hs || null;").await.unwrap_or_default();
+        if !v.is_null() {
+            let login = v["login"].as_bool().unwrap_or(false) || v["message"].as_str().is_some_and(|m| m.contains("login")) || v["require_login"].as_bool().unwrap_or(false);
+            if login {
+                return Err("وارد اینستاگرام نشده‌اید؛ از «ورود به اینستاگرام» وارد شوید تا جستجوی بومی کار کند.".into());
+            }
+            return Ok(topsearch_hits(&v));
+        }
+        sleep(Duration::from_millis(300)).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn topsearch_gives_public_accounts() {
+        let v = serde_json::json!({"users": [
+            {"user": {"username": "cafe.lamiz", "full_name": "کافه لمیز", "is_private": false}},
+            {"user": {"username": "private_one", "full_name": "x", "is_private": true}},
+            {"user": {"username": "explore", "full_name": "reserved", "is_private": false}},
+            {"position": 3}
+        ], "hashtags": [{"hashtag": {"name": "cafe"}}]});
+        let h = topsearch_hits(&v);
+        assert_eq!(h.len(), 1, "{h:?}");
+        assert_eq!((h[0].url.as_str(), h[0].title.as_str()), ("https://www.instagram.com/cafe.lamiz/", "کافه لمیز"));
+        assert!(topsearch_hits(&serde_json::json!({"message": "login_required"})).is_empty());
+    }
 
     #[test]
     fn handles_and_titles() {

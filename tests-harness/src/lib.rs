@@ -25,6 +25,13 @@
 #[path = "../../src-tauri/src/jobs.rs"] pub mod jobs;
 #[path = "../../src-tauri/src/links.rs"] pub mod links;
 #[path = "../../src-tauri/src/web.rs"] pub mod web;
+#[path = "../../src-tauri/src/products.rs"] pub mod products;
+#[path = "../../src-tauri/src/strategy.rs"] pub mod strategy;
+#[path = "../../src-tauri/src/crm.rs"] pub mod crm;
+#[path = "../../src-tauri/src/fees.rs"] pub mod fees;
+#[path = "../../src-tauri/src/buybox.rs"] pub mod buybox;
+#[path = "../../src-tauri/src/alerts.rs"] pub mod alerts;
+#[path = "../../src-tauri/src/fx.rs"] pub mod fx;
 
 pub fn log_line(_: &str, _: &str) {}
 

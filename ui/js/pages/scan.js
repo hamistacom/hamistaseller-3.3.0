@@ -1,6 +1,6 @@
 // Scan: form on one side, live progress on the other. The job keeps running if you leave the page.
 import { hero, cityPhoto, keywordPhoto, photo } from "../photos.js";
-import { h, icon, invoke, fa, clear, safe, select, field, input, toggle, tagInput, toast, modal, bar, ago, COLORS } from "../core.js";
+import { h, icon, invoke, fa, clear, safe, select, field, input, toggle, tagInput, toast, modal, bar, ago, COLORS, skipWaitButton } from "../core.js";
 import { app, bankOptions, refreshLists, go } from "../state.js";
 import { job, onJob, runJob } from "../jobs.js";
 import { SUGGESTED_KEYWORDS } from "../data.js";
@@ -110,8 +110,8 @@ const SOURCE_UI = {
     area: false,
     enrich: false,
     browserOpts: false,
-    login: false,
-    hint: "فقط کانال‌های عمومی کسب‌وکارها (نام، لینک، تعداد عضو و راه تماس توضیحات). گروه‌ها و حساب‌های شخصی کنار گذاشته می‌شوند.",
+    login: true,
+    hint: "کانال‌ها و گروه‌های عمومی کسب‌وکارها: نام، لینک، تعداد عضو و هر راه تماس توضیحات (شماره، ایمیل، سایت و آیدی ادمین/سفارش به‌صورت لینک). حساب‌های شخصی کنار گذاشته می‌شوند. برای خواندن کانال‌ها ورود لازم نیست؛ اگر تلگرام در شبکه شما فیلتر است VPN/پروکسی سیستم را روشن کنید.",
     kw: "موضوع کانال",
     kwHint: "مثلاً «لوازم خانگی»، «پوشاک عمده».",
   },
@@ -120,7 +120,7 @@ const SOURCE_UI = {
     enrich: false,
     browserOpts: true,
     login: true,
-    hint: "پیج‌های کسب‌وکاری با اطلاعات تماس عمومی بیو. می‌توانید با دکمه زیر یک بار در مرورگر وارد اینستاگرام شوید یا از تنظیمات ← ماژول‌ها Graph API را وصل کنید.",
+    hint: "پیج‌های کسب‌وکاری با اطلاعات تماس عمومی بیو (شماره، ایمیل، سایت، واتساپ و آیدی ادمین). می‌توانید با دکمه زیر یک بار در مرورگر وارد اینستاگرام شوید یا از تنظیمات ← ماژول‌ها Graph API را وصل کنید.",
     kw: "کلمه یا هشتگ",
     kwHint: "مثلاً «کافه» یا «#مبلمان».",
   },
@@ -430,7 +430,7 @@ export async function render(root, params = {}) {
           ? h("span", { class: "pill accent" }, h("span", { class: "dot live" }), "در حال اجرا")
           : h("span", { class: `pill ${j.result?.error ? "bad" : "ok"}` }, j.result?.error ? "با خطا" : "پایان"),
       ),
-      j.captcha ? h("div", { class: "callout" }, icon("alert"), h("div", {}, h("b", {}, "منتظر ورود یا تأیید شما در مرورگر"), h("div", { class: "small" }, j.captcha))) : null,
+      j.captcha ? h("div", { class: "callout" }, icon("alert"), h("div", { class: "grow" }, h("b", {}, "منتظر ورود یا تأیید شما در مرورگر"), h("div", { class: "small" }, j.captcha)), skipWaitButton()) : null,
       h(
         "div",
         { class: "grid-4" },

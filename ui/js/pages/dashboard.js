@@ -86,17 +86,41 @@ function insight(d, names) {
   return { tag: "بانک خود را گسترش دهید", text: "با انتخاب چند منبع با هم (گوگل‌مپ، دیوار، شیپور، بلد، نشان) در «استخراج»، کسب‌وکارهای بیشتری پیدا کنید.", go: () => go("scan") };
 }
 
+/** «پیگیری‌های امروز و معوق»: businesses whose reminder day has come, the most overdue first. */
+function dueCard(due, reload) {
+  return h(
+    "div",
+    { class: `card stack dash-due ${due.some((x) => x.overdueDays > 0) ? "late" : ""}`.trim() },
+    h("div", { class: "card-h" }, icon("clock", "sm"), h("h2", {}, "پیگیری‌های امروز و معوق"), due.length ? h("span", { class: `pill ${due.some((x) => x.overdueDays > 0) ? "bad" : "info"}` }, fa(due.length)) : null),
+    due.length
+      ? h(
+          "div",
+          { class: "feed" },
+          due.slice(0, 8).map((x) =>
+            h(
+              "div",
+              { class: "it" },
+              h("div", { class: "grow" }, h("button", { class: "link clip", type: "button", onclick: () => openCard(x.id, { onChange: reload }) }, h("b", {}, x.name)), h("span", {}, [x.person, x.phone, x.last && `آخرین: ${x.last}`].filter(Boolean).join(" · "))),
+              x.overdueDays > 0 ? h("span", { class: "pill bad" }, `${fa(x.overdueDays)} روز معوق`) : h("span", { class: "pill info" }, "امروز"),
+            ),
+          ),
+        )
+      : h("div", { class: "empty small" }, "پیگیری سررسیدشده‌ای نیست. در کارت مشتری «پیگیری بعدی» را بگذارید تا اینجا و با اعلان ویندوز یادآوری شود."),
+  );
+}
+
 export async function render(root, _params, actions) {
   actions.append(
     h("button", { class: "btn", type: "button", onclick: () => openEditor({}, { onChange: () => go("dashboard") }) }, icon("plus", "sm"), "افزودن مخاطب"),
     h("button", { class: "btn primary", type: "button", onclick: () => go("scan") }, icon("play", "sm"), "استخراج جدید"),
   );
-  const [d, recent, runs, acts, srcList] = await Promise.all([
+  const [d, recent, runs, acts, srcList, due] = await Promise.all([
     invoke("dashboard"),
     invoke("places", { filter: { listId: 0 }, offset: 0, limit: 7 }),
     invoke("runs"),
     invoke("activity", { limit: 8 }),
     invoke("sources_list").catch(() => []),
+    invoke("follow_ups_due").catch(() => []),
   ]);
   const names = Object.fromEntries(srcList.map((x) => [x.id, x.name]));
 
@@ -206,6 +230,7 @@ export async function render(root, _params, actions) {
           h("p", {}, ins.text),
         ),
       ),
+      dueCard(due, () => go("dashboard")),
       h(
         "div",
         { class: "grid-3" },

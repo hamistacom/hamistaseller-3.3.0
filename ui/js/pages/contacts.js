@@ -1,5 +1,5 @@
 // Banks + contacts table: filters, full names with manager under the brand, bulk actions, import / export.
-import { h, icon, invoke, fa, clear, safe, select, field, input, toast, modal, confirmBox, copy, handle, fileToBase64, pickFile, bar, appBadges, KIND, STATUS, COLORS } from "../core.js";
+import { h, icon, invoke, fa, clear, safe, select, field, input, toast, modal, confirmBox, copy, handle, fileToBase64, pickFile, bar, appBadges, vtable, KIND, STATUS, COLORS } from "../core.js";
 import { app, bankOptions, refreshLists, listName, go, on } from "../state.js";
 import { openCard, openEditor } from "./card.js";
 import { newBankModal } from "./scan.js";
@@ -322,27 +322,23 @@ function drawTable() {
   const page = Math.floor(st.offset / PAGE) + 1;
   clear(
     st.tableEl,
-    h(
-      "div",
-      { class: "table-wrap" },
-      h(
-        "table",
-        { class: "t" },
-        h(
-          "colgroup",
-          {},
-          h("col", { class: "w-check" }),
-          h("col", { class: "c-rn" }),
-          h("col", { class: "c-name" }),
-          h("col", { class: "c-phone" }),
-          h("col", { class: "c-land" }),
-          h("col", { class: "c-ch hide-md" }),
-          h("col", { class: "c-status" }),
-        ),
-        h("thead", {}, h("tr", {}, h("th", {}, st.headCb), h("th", {}, "#"), h("th", {}, "کسب‌وکار / مسئول"), h("th", {}, "موبایل"), h("th", {}, "تلفن ثابت"), h("th", { class: "hide-md" }, "راه‌های دیگر"), h("th", {}, "وضعیت"))),
-        h("tbody", {}, st.rows.map(row)),
+    vtable({
+      cols: h(
+        "colgroup",
+        {},
+        h("col", { class: "w-check" }),
+        h("col", { class: "c-rn" }),
+        h("col", { class: "c-name" }),
+        h("col", { class: "c-phone" }),
+        h("col", { class: "c-land" }),
+        h("col", { class: "c-ch hide-md" }),
+        h("col", { class: "c-status" }),
       ),
-    ),
+      head: h("thead", {}, h("tr", {}, h("th", {}, st.headCb), h("th", {}, "#"), h("th", {}, "کسب‌وکار / مسئول"), h("th", {}, "موبایل"), h("th", {}, "تلفن ثابت"), h("th", { class: "hide-md" }, "راه‌های دیگر"), h("th", {}, "وضعیت"))),
+      rows: st.rows,
+      row,
+      rowHeight: 58,
+    }).el,
     h(
       "div",
       { class: "pager" },

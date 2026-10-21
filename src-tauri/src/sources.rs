@@ -71,8 +71,8 @@ pub const SOURCES: &[Source] = &[
     },
     Source {
         id: "telegram",
-        name: "کانال‌های عمومی تلگرام",
-        desc: "کانال‌های عمومی کسب‌وکارها بر اساس موضوع به همراه تعداد عضو و اطلاعات تماس بیو",
+        name: "کانال‌ها و گروه‌های عمومی تلگرام",
+        desc: "کانال‌ها و گروه‌های عمومی کسب‌وکارها بر اساس موضوع، با تعداد عضو، آیدی ادمین و اطلاعات تماس بیو",
         icon: "telegram",
         kind: "scan",
         ready: true,
@@ -207,7 +207,12 @@ pub fn config_status(db: &Db, id: &str) -> Map<String, Value> {
 // ---------------- saving a found business ----------------
 
 pub fn save(db: &Db, emit: Emit<'_>, mut place: Place, c: &Contacts, origin: &str, labels: &[(&str, String)]) -> bool {
-    if !c.has_any() {
+    // a phone / e-mail, or a messenger id other than the page itself (Telegram/Instagram admin)
+    let page = place.maps_url.trim_end_matches('/');
+    let messenger = [&c.telegram, &c.whatsapp, &c.eitaa, &c.bale, &c.instagram]
+        .iter()
+        .any(|v| !v.is_empty() && v.trim_end_matches('/') != page);
+    if !c.has_any() && !messenger {
         let _ = db.insert_place(&place);
         scanner::log(emit, "muted", format!("{} — راه ارتباطی عمومی نداشت", place.name));
         return false;
@@ -359,6 +364,41 @@ pub fn site_query(source: &str, keyword: &str, area: &str) -> String {
     format!("{site} {} {}", keyword.trim(), area.trim()).trim().to_string()
 }
 
+/// Hits of the source's own search; a failure (not signed in, page changed) is only logged — the web search follows.
+async fn native_hits(source: &str, page: &chromiumoxide::Page, kw: &str, area: &str, limit: usize, token: &CancellationToken, emit: Emit<'_>) -> Vec<crate::websearch::Hit> {
+    let query = format!("{} {}", kw.trim(), area.trim()).trim().to_string();
+    scanner::status(emit, format!("جستجوی مستقیم {} برای «{query}»…", get(source).map_or(source, |s| s.name)));
+    let res = match source {
+        "balad" => crate::balad::search(page, &query, limit, token).await,
+        "telegram" => crate::telegram::search(page, &query, token).await,
+        "instagram" => crate::instagram::search(page, &query, token).await,
+        _ => return vec![],
+    };
+    match res {
+        Ok(h) => {
+            if !h.is_empty() {
+                scanner::log(emit, "info", format!("جستجوی مستقیم: {} نتیجه", h.len()));
+            }
+            h
+        }
+        Err(e) => {
+            scanner::log(emit, "info", e);
+            vec![]
+        }
+    }
+}
+
+/// `own` first, then the web hits it does not already have (same address, ignoring the query string).
+pub fn merge_hits(mut own: Vec<crate::websearch::Hit>, web: Vec<crate::websearch::Hit>) -> Vec<crate::websearch::Hit> {
+    let norm = |u: &str| u.split(['?', '#']).next().unwrap_or("").trim_end_matches('/').to_lowercase();
+    for h in web {
+        if !own.iter().any(|o| norm(&o.url) == norm(&h.url)) {
+            own.push(h);
+        }
+    }
+    own
+}
+
 pub async fn run_search(db: &Db, s: &Settings, profile: &Path, req: &ScanRequest, token: &CancellationToken, emit: Emit<'_>) -> Res<Summary> {
     let source = req.source.as_str();
     let keywords: Vec<String> = req.keywords.iter().map(|k| k.trim().to_string()).filter(|k| !k.is_empty()).collect();
@@ -366,28 +406,32 @@ pub async fn run_search(db: &Db, s: &Settings, profile: &Path, req: &ScanRequest
         return Err("حداقل یک کلمه کلیدی وارد کنید.".into());
     }
 
-    // Interactive login mode for Instagram in the browser
-    if source == "instagram" && keywords.len() == 1 && keywords[0] == "__login__" {
-        scanner::status(emit, "باز کردن پنجره مرورگر برای ورود به حساب اینستاگرام…");
+    // Interactive sign-in (Instagram / Telegram web) in a visible window; the session stays in the
+    // app's browser profile, so later extractions read pages as the signed-in user
+    if matches!(source, "instagram" | "telegram") && keywords.len() == 1 && keywords[0] == "__login__" {
+        let (label, url) = if source == "telegram" {
+            ("تلگرام", "https://web.telegram.org/k/")
+        } else {
+            ("اینستاگرام", "https://www.instagram.com/accounts/login/")
+        };
+        scanner::status(emit, format!("باز کردن پنجره مرورگر برای ورود به حساب {label}…"));
+        scanner::clear_wait_skip();
         let mut eng = scanner::launch(s, profile, false, 0).await?;
-        scanner::goto(&eng.list, "https://www.instagram.com/accounts/login/").await;
+        scanner::goto(&eng.list, url).await;
         emit(ScanEvent::Captcha {
-            message: "پنجره مرورگر باز شد. لطفاً وارد حساب اینستاگرام خود شوید و پس از ورود، پنجره را ببندید تا نشست شما ذخیره شود.".into(),
+            message: format!("پنجره مرورگر باز شد. وارد حساب {label} شوید و پس از ورود، پنجره را ببندید (یا «رد کردن و ادامه» را بزنید) تا نشست ذخیره شود. اگر صفحه سفید ماند، VPN/پروکسی سیستم را روشن کنید و صفحه را تازه کنید."),
         });
         let deadline = Instant::now() + Duration::from_secs(600);
         while Instant::now() < deadline && !token.is_cancelled() {
-            if !eng.alive.load(std::sync::atomic::Ordering::Relaxed) || eng.proc.exited() {
+            if scanner::take_wait_skip() || !eng.alive.load(std::sync::atomic::Ordering::Relaxed) || eng.proc.exited() {
                 break;
             }
             sleep(Duration::from_secs(1)).await;
         }
         scanner::shut(Some(eng)).await;
         return Ok(Summary {
-            checked: 0,
-            found: 0,
-            cancelled: false,
-            error: false,
-            message: "نشست حساب اینستاگرام ذخیره شد. اکنون می‌توانید استخراج را شروع کنید.".into(),
+            message: format!("نشست حساب {label} ذخیره شد. اکنون می‌توانید استخراج را شروع کنید."),
+            ..Default::default()
         });
     }
 
@@ -426,8 +470,20 @@ pub async fn run_search(db: &Db, s: &Settings, profile: &Path, req: &ScanRequest
         let query = site_query(source, kw, area);
         scanner::status(emit, format!("جستجوی «{query}»…"));
         let pages = ((limit as usize).div_ceil(10) + 1).min(10);
-        let hits = match crate::websearch::search_attended(&eng.list, s, profile, &query, pages, token, emit).await {
-            Ok(h) => h,
+        // the source's own search first (Balad; Telegram and Instagram with the user's saved sign-in), then the
+        // web search for what is still missing: both lists are merged
+        let own = native_hits(source, &eng.list, kw, area, limit as usize, token, emit).await;
+        let web = if own.len() >= limit as usize {
+            Ok(vec![])
+        } else {
+            crate::websearch::search_attended(&eng.list, s, profile, &query, pages, token, emit).await
+        };
+        let hits = match web {
+            Ok(w) => merge_hits(own, w),
+            Err(e) if !own.is_empty() => {
+                scanner::log(emit, "warning", format!("جستجوی وب: {e}"));
+                own
+            }
             Err(e) => {
                 let _ = db.run_finish(run_id, 0, 0, "failed", &e);
                 failure = Some(e);
@@ -548,6 +604,13 @@ pub fn public_sql_list() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn own_hits_come_first_and_web_hits_do_not_repeat() {
+        let h = |u: &str| crate::websearch::Hit { url: u.into(), title: String::new(), snippet: String::new() };
+        let m = merge_hits(vec![h("https://t.me/a_channel"), h("https://t.me/b_channel")], vec![h("https://t.me/b_channel/"), h("https://t.me/c_channel?x=1"), h("https://t.me/a_channel#f")]);
+        assert_eq!(m.iter().map(|x| x.url.as_str()).collect::<Vec<_>>(), ["https://t.me/a_channel", "https://t.me/b_channel", "https://t.me/c_channel?x=1"]);
+    }
 
     #[test]
     fn registry_is_sane() {

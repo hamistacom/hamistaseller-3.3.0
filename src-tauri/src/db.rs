@@ -11,7 +11,7 @@ pub fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
-pub const SCHEMA_VERSION: i64 = 10;
+pub const SCHEMA_VERSION: i64 = 13;
 
 // ---------------- types ----------------
 
@@ -56,6 +56,8 @@ pub struct Place {
     pub updated_at: String,
     /// Picture of the business from its public page — shown on the card only, never exported.
     pub photo: String,
+    /// When to follow this business up next, local "YYYY-MM-DD HH:MM" (empty = no reminder).
+    pub follow_up_at: String,
     pub contacts: Vec<Contact>,
 }
 
@@ -313,6 +315,34 @@ CREATE TABLE IF NOT EXISTS brand_runs (
 CREATE INDEX IF NOT EXISTS brand_runs_b ON brand_runs(brand_id, id);
 ";
 
+/// v11: a brand's own store link (Basalam booth, shop page, Telegram channel) for brand analysis.
+const SCHEMA_V11: &str = "ALTER TABLE brands ADD COLUMN store TEXT NOT NULL DEFAULT '';";
+/// v12: the owner's answers for a brand's strategy / business plan (JSON of `strategy::Inputs`).
+const SCHEMA_V12: &str = "ALTER TABLE brands ADD COLUMN plan TEXT NOT NULL DEFAULT '';";
+
+/// v13: B2B follow-up timeline (`place_logs`, `places.follow_up_at`), daily FX / gold rates (`fx_rates`), and the
+/// seller's own listing for BuyBox tracking on the watchlist and the catalogue.
+const SCHEMA_V13: &str = "
+ALTER TABLE places ADD COLUMN follow_up_at TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS places_follow ON places(follow_up_at) WHERE follow_up_at<>'';
+CREATE TABLE IF NOT EXISTS place_logs(
+  id INTEGER PRIMARY KEY, place_id INTEGER NOT NULL REFERENCES places(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL, note TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')));
+CREATE INDEX IF NOT EXISTS place_logs_p ON place_logs(place_id, id);
+CREATE TABLE IF NOT EXISTS fx_rates(date TEXT PRIMARY KEY, usd_toman INTEGER NOT NULL DEFAULT 0, gold18_toman INTEGER NOT NULL DEFAULT 0);
+ALTER TABLE watch ADD COLUMN my_seller_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE watch ADD COLUMN my_product_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE watch ADD COLUMN min_margin_pct REAL NOT NULL DEFAULT 0;
+ALTER TABLE watch ADD COLUMN alert_channel TEXT NOT NULL DEFAULT '';
+ALTER TABLE watch ADD COLUMN cost INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE watch ADD COLUMN buybox TEXT NOT NULL DEFAULT '';
+ALTER TABLE catalog ADD COLUMN my_seller_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE catalog ADD COLUMN my_product_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE catalog ADD COLUMN min_margin_pct REAL NOT NULL DEFAULT 0;
+ALTER TABLE catalog ADD COLUMN alert_channel TEXT NOT NULL DEFAULT '';
+ALTER TABLE catalog ADD COLUMN buybox TEXT NOT NULL DEFAULT '';
+";
+
 /// v10: the daily price watchlist and the seller's own catalogue (matched against the market).
 const SCHEMA_V10: &str = "
 CREATE TABLE IF NOT EXISTS watch(
@@ -345,7 +375,7 @@ CREATE TABLE IF NOT EXISTS brands(
 
 /// Places reachable on at least one channel (the only ones the UI lists).
 const HAS: &str = "EXISTS(SELECT 1 FROM contacts c WHERE c.place_id=p.id)";
-const PCOLS: &str = "p.id,p.list_id,p.place_key,p.name,p.contact_person,p.contact_role,p.category,p.address,p.website,p.rating,p.reviews,p.lat,p.lng,p.maps_url,p.keyword,p.province,p.city,p.status,p.note,p.tags,p.source,p.created_at,p.updated_at,p.photo";
+const PCOLS: &str = "p.id,p.list_id,p.place_key,p.name,p.contact_person,p.contact_role,p.category,p.address,p.website,p.rating,p.reviews,p.lat,p.lng,p.maps_url,p.keyword,p.province,p.city,p.status,p.note,p.tags,p.source,p.created_at,p.updated_at,p.photo,p.follow_up_at";
 const SOCIAL: &[&str] = &["instagram", "telegram", "whatsapp", "eitaa", "bale"];
 pub const KINDS: &[&str] = &["mobile", "landline", "email", "instagram", "telegram", "whatsapp", "eitaa", "bale"];
 
@@ -375,6 +405,7 @@ fn to_place(r: &Row) -> rusqlite::Result<Place> {
         created_at: r.get(21)?,
         updated_at: r.get(22)?,
         photo: r.get(23)?,
+        follow_up_at: r.get(24)?,
         contacts: vec![],
     })
 }
@@ -417,6 +448,15 @@ fn migrate(c: &mut Connection) -> rusqlite::Result<()> {
         }
         if v < 10 {
             tx.execute_batch(SCHEMA_V10)?;
+        }
+        if v < 11 {
+            tx.execute_batch(SCHEMA_V11)?;
+        }
+        if v < 12 {
+            tx.execute_batch(SCHEMA_V12)?;
+        }
+        if v < 13 {
+            tx.execute_batch(SCHEMA_V13)?;
         }
         tx.execute_batch(&format!("PRAGMA user_version={SCHEMA_VERSION}"))?;
         tx.commit()?;
@@ -551,6 +591,12 @@ impl Db {
             tx.execute(
                 "INSERT OR IGNORE INTO contacts(place_id,list_id,kind,value,label,origin) SELECT ?1,?2,kind,value,label,origin FROM contacts WHERE place_id=?3",
                 params![target, to, id],
+            )
+            .map_err(err)?;
+            // the follow-up timeline goes with the business (moved) or is copied
+            tx.execute(
+                "INSERT INTO place_logs(place_id,kind,note,created_at) SELECT ?1,kind,note,created_at FROM place_logs WHERE place_id=?2",
+                params![target, id],
             )
             .map_err(err)?;
             if !copy {
@@ -1048,6 +1094,9 @@ impl Db {
 
     pub fn market_save(&self, r: &crate::market::Report) -> Res<i64> {
         let c = self.c();
+        // the page keeps the full report; the stored copy keeps the best offers only (see `market::slim`)
+        let mut stored = r.clone();
+        crate::market::slim(&mut stored, crate::market::KEEP_OFFERS);
         c.execute(
             "INSERT INTO market_runs(query,qkey,brand,offers,median,min,report) VALUES(?1,?2,?3,?4,?5,?6,?7)",
             params![
@@ -1057,11 +1106,49 @@ impl Db {
                 r.offers.len() as i64,
                 r.stats.median,
                 r.stats.min,
-                serde_json::to_string(r).map_err(err)?
+                serde_json::to_string(&stored).map_err(err)?
             ],
         )
         .map_err(err)?;
         Ok(c.last_insert_rowid())
+    }
+
+    /// Start-up upkeep: product searches and brand analyses older than `PRUNE_DAYS` lose their long offer /
+    /// product lists. The numbers the price trend and the history rest on (`median`, `min`, `offers`
+    /// columns and the report's stats, brand shares, channels, tiers) stay, so nothing in the trend
+    /// changes. Returns the number of rows slimmed.
+    pub fn prune_old_reports(&self) -> Res<usize> {
+        let c = self.c();
+        let cut = format!("-{} days", crate::market::PRUNE_DAYS);
+        let mut done = 0;
+        let rows: Vec<(i64, String)> = {
+            let mut st = c
+                .prepare("SELECT id, report FROM market_runs WHERE created_at < datetime('now','localtime', ?1) AND length(report) > 12000")
+                .map_err(err)?;
+            collect(st.query_map([&cut], |r| Ok((r.get(0)?, r.get(1)?))))?
+        };
+        for (id, raw) in rows {
+            let Ok(mut rep) = serde_json::from_str::<crate::market::Report>(&raw) else { continue };
+            if crate::market::slim(&mut rep, crate::market::KEEP_OLD_OFFERS) {
+                c.execute("UPDATE market_runs SET report=?1 WHERE id=?2", params![serde_json::to_string(&rep).map_err(err)?, id]).map_err(err)?;
+                done += 1;
+            }
+        }
+        let rows: Vec<(i64, String)> = {
+            let mut st = c
+                .prepare("SELECT id, report FROM brand_runs WHERE created_at < datetime('now','localtime', ?1) AND length(report) > 8000")
+                .map_err(err)?;
+            collect(st.query_map([&cut], |r| Ok((r.get(0)?, r.get(1)?))))?
+        };
+        for (id, raw) in rows {
+            let Ok(mut rep) = serde_json::from_str::<crate::brand::BrandReport>(&raw) else { continue };
+            if rep.products.len() > 6 {
+                rep.products.truncate(6);
+                c.execute("UPDATE brand_runs SET report=?1 WHERE id=?2", params![serde_json::to_string(&rep).map_err(err)?, id]).map_err(err)?;
+                done += 1;
+            }
+        }
+        Ok(done)
     }
 
     /// Earlier searches of the same product and brand (oldest first, last of each day): (date, median, min).

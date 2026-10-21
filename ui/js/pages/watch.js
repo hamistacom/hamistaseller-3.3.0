@@ -4,6 +4,7 @@ import { h, icon, invoke, fa, clear, safe, input, field, toast, modal, confirmBo
 import { go } from "../state.js";
 import { runJob, onJob } from "../jobs.js";
 import { pbadge, sparkline, changePill, toman, money, watchModal } from "./market.js";
+import { alertModal, buyboxLine, profitModal, trackFields } from "./profit.js";
 
 const remember = (k) => {
   try {
@@ -44,7 +45,7 @@ export async function render(root, params, actions) {
     runJob("watch", "پایش قیمت", "watch_run", { ids: [] });
     afterJob(reload);
   });
-  actions.append(h("label", { class: "row tight-row small muted" }, icon("clock", "sm"), "پایش خودکار هر روز ساعت", time), runAll);
+  actions.append(h("button", { class: "btn", type: "button", title: "تلگرام یا پیامک برای وقتی بای‌باکس از دست می‌رود", onclick: alertModal }, icon("bell", "sm"), "هشدار تلگرام / پیامک"), h("label", { class: "row tight-row small muted" }, icon("clock", "sm"), "پایش خودکار هر روز ساعت", time), runAll);
 
   if (!items.length) {
     root.append(
@@ -96,6 +97,7 @@ export async function render(root, params, actions) {
         h("td", {}, changePill(w.swing.change30)),
         h("td", {}, w.swing.points >= 3 ? h("span", { class: `pill ${vc}`, title: `ضریب تغییرات میانه‌های روزانه: ${fa(w.swing.volatility)}٪` }, vl) : h("span", { class: "x small" }, "داده کم"), w.swing.points >= 3 ? h("div", { class: `small trend-t ${dc}` }, dl) : null),
         h("td", {}, w.ownPrice ? [h("span", { class: "num" }, fa(w.ownPrice)), own !== null ? h("div", { class: `small ${own > 0 ? "warn-t" : "ok-t"}` }, own > 0 ? `${fa(own)}٪ بالای میانه` : `${fa(Math.abs(own))}٪ زیر میانه`) : null] : h("span", { class: "x" }, "—")),
+        h("td", {}, buyboxLine(w.buybox)),
         h("td", { class: "small" }, w.lastRun ? ago(w.lastRun) : "هنوز نه", w.error ? h("div", { class: "x small warn-t", title: w.error }, "خطا در آخرین بررسی") : null),
         h(
           "td",
@@ -129,7 +131,7 @@ export async function render(root, params, actions) {
       h(
         "div",
         { class: "card flush" },
-        h("div", { class: "table-wrap" }, h("table", { class: "t watch-t" }, h("thead", {}, h("tr", {}, ["کالا", "روند", "میانه امروز", "از قبل", "۷ روز", "۳۰ روز", "نوسان", "قیمت شما", "آخرین بررسی", ""].map((t) => h("th", {}, t)))), tbody)),
+        h("div", { class: "table-wrap" }, h("table", { class: "t watch-t" }, h("thead", {}, h("tr", {}, ["کالا", "روند", "میانه امروز", "از قبل", "۷ روز", "۳۰ روز", "نوسان", "قیمت شما", "بای‌باکس", "آخرین بررسی", ""].map((t) => h("th", {}, t)))), tbody)),
         h("p", { class: "small muted pad" }, "قیمت‌ها به تومان است؛ اگر کالا در بسته‌های مختلف عرضه شود، به ازای هر کیلوگرم یا لیتر. «نوسان» میزان بالا و پایین رفتن قیمت در روزهای ثبت‌شده است."),
       ),
     ),
@@ -141,16 +143,18 @@ function editWatch(w, done) {
   const own = input({ inputmode: "numeric", dir: "ltr", value: w.ownPrice ? fa(w.ownPrice) : "" });
   const pct = input({ type: "number", min: 1, max: 100, dir: "ltr", value: w.alertPct || 5 });
   const on = h("input", { type: "checkbox", checked: w.enabled });
+  const cost = input({ inputmode: "numeric", dir: "ltr", value: w.cost ? fa(w.cost) : "", placeholder: "برای کف سود ریپرایسر" });
+  const track = trackFields(w);
   modal({
     title: "ویرایش پایش",
-    body: [field("نام", name), field("قیمت فروش شما (تومان)", own), field("آستانه هشدار (٪)", pct), h("label", { class: "check" }, on, h("span", {}, "پایش روزانه فعال باشد"))],
+    body: [field("نام", name), field("قیمت فروش شما (تومان)", own), field("بهای خرید (تومان)", cost), field("آستانه هشدار (٪)", pct), track.el, h("label", { class: "check" }, on, h("span", {}, "پایش روزانه فعال باشد"))],
     actions: [
       { label: "انصراف" },
       {
         label: "ذخیره",
         kind: "primary",
         onClick: async () => {
-          const id = await safe(invoke("watch_save", { item: { ...w, name: name.value, ownPrice: money(own.value), alertPct: Number(pct.value) || 5, enabled: on.checked, history: [], swing: {} } }), "ذخیره شد");
+          const id = await safe(invoke("watch_save", { item: { ...w, name: name.value, ownPrice: money(own.value), cost: money(cost.value), alertPct: Number(pct.value) || 5, enabled: on.checked, ...track.value(), history: [], swing: {} } }), "ذخیره شد");
           if (id === undefined) return false;
           done();
         },
@@ -261,6 +265,7 @@ export async function renderCatalog(root, params, actions) {
           h("td", { class: "num" }, i.median ? [fa(i.median), h("div", { class: "x small" }, `${fa(i.min)} تا ${fa(i.max)}`)] : "—"),
           h("td", {}, i.position >= 0 ? h("div", { class: "stack tight" }, pos, h("span", { class: `small ${i.position > 75 ? "warn-t" : i.position < 25 ? "ok-t" : ""}`.trim() }, i.position > 75 ? "گران‌تر از بازار" : i.position < 25 ? "ارزان‌تر از بازار" : "رقابتی")) : h("span", { class: "x" }, "—")),
           h("td", { class: "num" }, i.srp ? h("b", {}, fa(i.srp)) : "—"),
+          h("td", {}, buyboxLine(i.buybox)),
           h("td", { class: "small" }, i.checkedAt ? ago(i.checkedAt) : "—", i.note ? h("div", { class: "x small clip", title: i.note }, i.note) : null),
           h(
             "td",
@@ -270,6 +275,8 @@ export async function renderCatalog(root, params, actions) {
               { class: "row tight-row" },
               h("button", { class: "btn ghost sm icon-only", type: "button", title: "بررسی همین کالا", onclick: () => check([i.id]) }, icon("refresh", "sm")),
               i.runId ? h("button", { class: "btn ghost sm icon-only", type: "button", title: "تحلیل کامل بازار", onclick: () => go("market", { run: i.runId }) }, icon("chart", "sm")) : null,
+              h("button", { class: "btn ghost sm icon-only", type: "button", title: "سود روی هر کانال فروش", onclick: () => profitModal({ name: i.name, price: i.ownPrice || i.srp, cost: i.cost, category: `${i.name} ${i.brand}` }) }, icon("chart", "sm")),
+              h("button", { class: "btn ghost sm icon-only", type: "button", title: "ردیابی بای‌باکس و هشدار", onclick: () => trackModal(i, reload) }, icon("target", "sm")),
               h("button", { class: "btn ghost sm icon-only", type: "button", title: "افزودن به پایش روزانه", onclick: () => watchModal({ req: { exact: false, platforms }, query: i.query }, i.query, "") }, icon("bell", "sm")),
             ),
           ),
@@ -288,11 +295,34 @@ export async function renderCatalog(root, params, actions) {
         "div",
         { class: "card flush" },
         h("div", { class: "card-h pad wrap" }, h("h2", {}, "کالاها و جایگاه قیمت"), box, show, chk, del),
-        h("div", { class: "table-wrap" }, h("table", { class: "t cat-t" }, h("thead", {}, h("tr", {}, ["", "کالا", "قیمت شما", "تطبیق", "میانه بازار", "جایگاه قیمت شما", "قیمت پیشنهادی", "آخرین بررسی", ""].map((t) => h("th", {}, t)))), tbody)),
+        h("div", { class: "table-wrap" }, h("table", { class: "t cat-t" }, h("thead", {}, h("tr", {}, ["", "کالا", "قیمت شما", "تطبیق", "میانه بازار", "جایگاه قیمت شما", "قیمت پیشنهادی", "بای‌باکس", "آخرین بررسی", ""].map((t) => h("th", {}, t)))), tbody)),
         h("p", { class: "small muted pad" }, "«دقیق»: برند، اندازه، تعداد و مدل آگهی با کالای شما یکی است. «احتمالی»: بیشتر کلمه‌ها یکی است و هیچ مشخصه‌ای مغایر نیست؛ آگهی‌ها را با دکمه تعداد آگهی ببینید. قیمت‌های پرت (قدیمی یا اشتباه) کنار گذاشته می‌شوند."),
       ),
     ),
   );
+}
+
+/** Buy-box tracking of one catalogue item. */
+function trackModal(i, done) {
+  const t = trackFields(i);
+  modal({
+    title: "ردیابی بای‌باکس",
+    sub: `«${i.name}» — با «بررسی در بازار» جایگاه شما بین فروشندگان همین کالا سنجیده و قیمت پیشنهادی ریپرایسر نشان داده می‌شود.`,
+    body: [t.el, h("button", { class: "btn sm", type: "button", onclick: alertModal }, icon("bell", "sm"), "تنظیمات هشدار تلگرام / پیامک")],
+    actions: [
+      { label: "انصراف" },
+      {
+        label: "ذخیره",
+        kind: "primary",
+        onClick: async () => {
+          const v = t.value();
+          const ok = await safe(invoke("catalog_track", { id: i.id, seller: v.mySellerName, url: v.myProductUrl, margin: v.minMarginPct, channel: v.alertChannel }), "ذخیره شد");
+          if (ok === undefined) return false;
+          done();
+        },
+      },
+    ],
+  });
 }
 
 function matchesModal(i) {

@@ -19,7 +19,7 @@ pub fn fa_num(n: f64) -> String {
     let s = int.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).rem_euclid(3) == 0 {
             out.push('٬');
         }
         out.push(c);
@@ -1219,6 +1219,23 @@ pub fn html_unescape(s: &str) -> String {
 }
 
 /// http(s) links written as plain text (bios, channel descriptions).
+/// `@handle` mentions in a bio / channel description («سفارش: @lamiz_admin») — Telegram and
+/// Instagram ids (5–32 chars, latin letters, digits, `_`, `.`); e-mail addresses are not mentions.
+pub fn mentions_in_text(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    for (i, _) in text.match_indices('@') {
+        if text[..i].chars().next_back().is_some_and(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_') {
+            continue; // name@mail.com
+        }
+        let h: String = text[i + 1..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '.').collect();
+        let h = h.trim_end_matches('.').to_string();
+        if (5..=32).contains(&h.len()) && h.starts_with(|c: char| c.is_ascii_alphabetic()) && !out.contains(&h) {
+            out.push(h);
+        }
+    }
+    out
+}
+
 pub fn links_in_text(text: &str) -> Vec<String> {
     text.split(|c: char| c.is_whitespace() || "()<>«»\"'،".contains(c))
         .filter(|w| {
@@ -1242,6 +1259,12 @@ pub fn links_in_text(text: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn mentions() {
+        assert_eq!(super::mentions_in_text("سفارش: @lamiz_admin و پشتیبانی @Lamiz.Support. ایمیل info@lamiz.ir"), vec!["lamiz_admin", "Lamiz.Support"]);
+        assert!(super::mentions_in_text("@ab @12345").is_empty());
+    }
+
     #[test]
     fn fa_numbers() {
         assert_eq!(super::fa_num(1_234_567.0), "۱٬۲۳۴٬۵۶۷");

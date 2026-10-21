@@ -512,9 +512,9 @@ pub fn relevance(query: &str, title: &str, url: &str) -> i64 {
     (hit * 100 / q.len()) as i64
 }
 
-fn client() -> reqwest::Client {
+pub(crate) fn client() -> reqwest::Client {
+    // follows the system proxy (VPN): web results are often on sites that need the user's proxy
     reqwest::Client::builder()
-        .no_proxy()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36")
         .connect_timeout(Duration::from_secs(8))
         .timeout(Duration::from_secs(20))
@@ -577,6 +577,142 @@ pub async fn results(page: &chromiumoxide::Page, query: &str, want: usize, token
         });
     }
     out
+}
+
+// ---------------- «وب» as a product source ----------------
+
+/// Does a shop's page show the eNamad trust seal (Iran's e-commerce licence)?
+pub fn has_enamad(html: &str) -> bool {
+    let l = html.to_lowercase();
+    l.contains("trustseal.enamad.ir") || l.contains("enamad.ir/")
+}
+
+/// A shop's own site worth reading for prices: not a marketplace (they are their own sources),
+/// blog, directory, social page or video site.
+pub fn is_shop_site(domain: &str) -> bool {
+    !matches!(classify_source(domain, ""), SourceQuality::Marketplace | SourceQuality::Blog | SourceQuality::Directory)
+}
+
+/// The «وب» source of product analysis: products with prices from brands' own sites and shops
+/// (eNamad-licensed shops first), read with the same engine as «دریافت لیست محصول». With `site`,
+/// only that source is read (a site, a Basalam booth, one page or a Telegram channel).
+/// Returns the offers (platform "web") and an error text when nothing could be read.
+pub async fn shop_offers(
+    s: &crate::scanner::Settings,
+    profile: &std::path::Path,
+    query: &str,
+    site: &str,
+    limit: usize,
+    token: &CancellationToken,
+    emit: crate::scanner::Emit<'_>,
+) -> (Vec<crate::market::Offer>, Option<String>) {
+    use crate::products::{self, Scope};
+    let site = site.trim();
+    let limit = limit.clamp(10, 300);
+    // 1) where to read: the given source, or the best shop sites a web search finds
+    let (starts, scope): (Vec<String>, Scope) = if site.is_empty() {
+        match search_shops(s, profile, &format!("{query} قیمت خرید"), token).await {
+            Ok(hits) if !hits.is_empty() => {
+                let hosts: Vec<String> = hits.iter().map(|u| host(u)).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+                (hits, Scope::Sites(hosts))
+            }
+            Ok(_) => return (vec![], Some("در جستجوی وب، سایت فروشگاهی مرتبطی پیدا نشد.".into())),
+            Err(e) => return (vec![], Some(e)),
+        }
+    } else {
+        let url = products::normalize(site);
+        match products::scope_of(&url) {
+            Err(e) => return (vec![], Some(e)),
+            Ok(Scope::Site { host: h, whole: true }) => {
+                // a whole shop: its own pages about this product (site search), else its home page
+                let hits = search_shops(s, profile, &format!("site:{h} {query}"), token).await.unwrap_or_default();
+                let hits: Vec<String> = hits.into_iter().filter(|u| host(u).ends_with(&h)).collect();
+                (if hits.is_empty() { vec![url] } else { hits }, Scope::Site { host: h, whole: false })
+            }
+            Ok(sc) => (vec![url], sc),
+        }
+    };
+    if token.is_cancelled() {
+        return (vec![], None);
+    }
+    // 2) read them
+    let items = if let Scope::Telegram(_) = scope {
+        let req = products::ListReq {
+            url: starts[0].clone(),
+            limit: limit as i64,
+            ..Default::default()
+        };
+        match products::run(s, profile, &req, token, emit).await {
+            Ok(r) => r.items,
+            Err(e) => return (vec![], Some(e)),
+        }
+    } else {
+        let pages = starts.len() + 4;
+        match products::crawl(s, profile, &starts, &scope, limit, pages, token, emit).await {
+            Ok((i, _, _)) => i,
+            Err(e) => return (vec![], Some(e)),
+        }
+    };
+    // 3) trust: shops showing the eNamad seal come first and say so
+    let hosts: std::collections::BTreeSet<String> = items.iter().map(|i| host(&i.url)).filter(|h| !h.is_empty() && h != "t.me").collect();
+    let http = client();
+    let checks = futures::future::join_all(hosts.iter().map(|h| {
+        let http = http.clone();
+        async move {
+            let html = async { http.get(format!("https://{h}/")).send().await.ok()?.text().await.ok() };
+            let ok = tokio::time::timeout(Duration::from_secs(10), html).await.ok().flatten().is_some_and(|x| has_enamad(&x));
+            (h.clone(), ok)
+        }
+    }))
+    .await;
+    let enamad: std::collections::HashSet<String> = checks.into_iter().filter(|(_, ok)| *ok).map(|(h, _)| h).collect();
+    let mut out: Vec<crate::market::Offer> = items
+        .into_iter()
+        .map(|i| {
+            let h = host(&i.url);
+            let trusted = enamad.contains(&h);
+            let seller = if !i.seller.is_empty() { i.seller } else { h.clone() };
+            crate::market::Offer {
+                platform: "web".into(),
+                title: i.title,
+                brand: i.brand,
+                price: i.price,
+                seller: if trusted { format!("{seller} ✓ اینماد") } else { seller },
+                rating: i.rating,
+                reviews: i.reviews,
+                url: crate::links::canonical(&i.url),
+                image: i.image,
+                sales: i.sales,
+                updated: i.date,
+                location: i.location,
+                seller_url: if i.seller_url.is_empty() { format!("https://{h}") } else { i.seller_url },
+                link: "exact".into(), // read from the shop's own page
+                ..Default::default()
+            }
+        })
+        .collect();
+    out.sort_by_key(|o| !o.seller.ends_with("اینماد")); // stable: site order kept within each group
+    (out, None)
+}
+
+/// Result links of a web search that point at shop sites (not marketplaces / blogs), at most 8,
+/// one or two per site. Uses the app's browser for one search (Bing, then DuckDuckGo).
+async fn search_shops(s: &crate::scanner::Settings, profile: &std::path::Path, q: &str, token: &CancellationToken) -> Result<Vec<String>, String> {
+    let eng = crate::scanner::launch(s, profile, s.headless, 0).await?;
+    let hits = crate::websearch::search(&eng.list, q, 2, token).await;
+    crate::scanner::shut(Some(eng)).await;
+    let mut per_host: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    Ok(hits?
+        .into_iter()
+        .map(|h| h.url)
+        .filter(|u| u.starts_with("http") && is_shop_site(&host(u)))
+        .filter(|u| {
+            let n = per_host.entry(host(u)).or_default();
+            *n += 1;
+            *n <= 2
+        })
+        .take(8)
+        .collect())
 }
 
 /// Turns a supplier page into a card: classifies it, and reads only the public business contact the
@@ -671,6 +807,13 @@ mod tests {
     const LD: &str = r#"<html><head>
       <script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","name":"عسل طبیعی خوانسار ۱ کیلویی","brand":{"@type":"Brand","name":"خوانسار"},"offers":{"@type":"Offer","price":"5800000","priceCurrency":"IRR","availability":"https://schema.org/InStock"}}</script>
       <meta property="og:title" content="x"></head><body>قیمت عمده و فروش عمده مستقیم از تولیدکننده، حداقل سفارش ۱۰ کیلو</body></html>"#;
+
+    #[test]
+    fn shop_sources() {
+        assert!(has_enamad(r#"<a referrerpolicy="origin" href="https://trustseal.enamad.ir/?id=123"><img src="https://trustseal.enamad.ir/logo.aspx?id=123"></a>"#));
+        assert!(!has_enamad("<html>no seal</html>"));
+        assert!(is_shop_site("asal-khansar.ir") && !is_shop_site("torob.com") && !is_shop_site("virgool.io") && !is_shop_site("t.me"));
+    }
 
     #[test]
     fn json_ld_product() {

@@ -3,6 +3,7 @@ import { h, icon, invoke, fa, clear, safe, select, field, input, toggle, toast, 
 import { app, refreshLicense, refreshLists } from "../state.js";
 import { ACCOUNT_KINDS, SMS_PRESETS, PLACEHOLDERS } from "../data.js";
 import { job, runJob } from "../jobs.js";
+import { alertModal } from "./profit.js";
 
 const TABS = [
   ["general", "عمومی"],
@@ -58,6 +59,13 @@ async function general(root) {
       "div",
       { class: "grid-2" },
       h("div", { class: "card stack" }, h("h2", {}, "موتور استخراج"), field("مسیر مرورگر", path), detected, h("div", { class: "grid-2" }, field("تب‌های هم‌زمان", tabs), field("سرعت", delay)), visible.el, expand.el),
+      h(
+        "div",
+        { class: "card stack" },
+        h("h2", {}, "هشدار بای‌باکس و قیمت"),
+        h("p", { class: "small muted" }, "وقتی بای‌باکس یک کالای پایش‌شده از دست برود یا برگردد، از طریق ربات تلگرام یا پنل پیامکی خودتان خبر می‌گیرید. توکن رمز می‌شود و فقط روی همین ویندوز باز می‌شود."),
+        h("button", { class: "btn sm", type: "button", onclick: alertModal }, icon("bell", "sm"), "تنظیم هشدار تلگرام / پیامک"),
+      ),
       h(
         "div",
         { class: "card stack" },
@@ -465,9 +473,9 @@ const MODULE_NOTES = {
   neshan: "فهرست کسب‌وکارهای نشان + یافتن شماره هر کدام در گوگل‌مپ.",
   balad: "صفحه‌های عمومی کسب‌وکارها در بلد، از طریق جستجوی وب.",
   instagram: "پیج‌های کسب‌وکاری، از طریق جستجوی وب و نشست مرورگر.",
-  telegram: "فقط کانال‌های عمومی؛ گروه‌ها و حساب‌های شخصی کنار گذاشته می‌شوند.",
+  telegram: "کانال‌ها و گروه‌های عمومی با آیدی ادمین و راه تماس؛ حساب‌های شخصی کنار گذاشته می‌شوند.",
 };
-const LOGIN_SOURCES = new Set(["divar", "sheypoor", "instagram"]);
+const LOGIN_SOURCES = new Set(["divar", "sheypoor", "instagram", "telegram"]);
 
 function moduleConfig(m, redraw) {
   const spec = MODULE_FIELDS[m.id];
