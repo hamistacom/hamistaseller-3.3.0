@@ -11,7 +11,7 @@ pub fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
-pub const SCHEMA_VERSION: i64 = 11;
+pub const SCHEMA_VERSION: i64 = 12;
 
 // ---------------- types ----------------
 
@@ -315,6 +315,8 @@ CREATE INDEX IF NOT EXISTS brand_runs_b ON brand_runs(brand_id, id);
 
 /// v11: a brand's own store link (Basalam booth, shop page, Telegram channel) for brand analysis.
 const SCHEMA_V11: &str = "ALTER TABLE brands ADD COLUMN store TEXT NOT NULL DEFAULT '';";
+/// v12: the owner's answers for a brand's strategy / business plan (JSON of `strategy::Inputs`).
+const SCHEMA_V12: &str = "ALTER TABLE brands ADD COLUMN plan TEXT NOT NULL DEFAULT '';";
 
 /// v10: the daily price watchlist and the seller's own catalogue (matched against the market).
 const SCHEMA_V10: &str = "
@@ -423,6 +425,9 @@ fn migrate(c: &mut Connection) -> rusqlite::Result<()> {
         }
         if v < 11 {
             tx.execute_batch(SCHEMA_V11)?;
+        }
+        if v < 12 {
+            tx.execute_batch(SCHEMA_V12)?;
         }
         tx.execute_batch(&format!("PRAGMA user_version={SCHEMA_VERSION}"))?;
         tx.commit()?;

@@ -23,6 +23,9 @@ pub struct Brand {
     /// The brand's own store: a Basalam booth, a shop / category page or a Telegram channel. Small
     /// brands that no search finds are defined by it (their real products, prices and reviews).
     pub store: String,
+    /// The owner's answers for «استراتژی و بیزینس پلن» (sector, model, budget, price …), kept so the
+    /// plan can be rebuilt after every analysis.
+    pub plan: Option<crate::strategy::Inputs>,
     pub report: Option<BrandReport>,
     pub analyzed_at: String,
 }
@@ -286,7 +289,7 @@ impl Db {
     pub fn brands(&self) -> Res<Vec<Brand>> {
         let c = self.c();
         let mut st = c
-            .prepare("SELECT id,name,own,website,instagram,category,note,report,analyzed_at,store FROM brands ORDER BY own DESC, id")
+            .prepare("SELECT id,name,own,website,instagram,category,note,report,analyzed_at,store,plan FROM brands ORDER BY own DESC, id")
             .map_err(err)?;
         let rows = st
             .query_map([], |r| {
@@ -302,6 +305,7 @@ impl Db {
                     report: serde_json::from_str(&rep).ok(),
                     analyzed_at: r.get(8)?,
                     store: r.get(9)?,
+                    plan: serde_json::from_str(&r.get::<_, String>(10)?).ok(),
                 })
             })
             .map_err(err)?;
@@ -349,6 +353,12 @@ impl Db {
             .map_err(err)?;
             Ok(b.id)
         }
+    }
+
+    pub fn brand_plan_save(&self, id: i64, p: &crate::strategy::Inputs) -> Res<()> {
+        let json = serde_json::to_string(p).map_err(err)?;
+        self.c().execute("UPDATE brands SET plan=?1 WHERE id=?2", rusqlite::params![json, id]).map_err(err)?;
+        Ok(())
     }
 
     pub fn brand_delete(&self, id: i64) -> Res<()> {

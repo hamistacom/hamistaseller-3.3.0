@@ -436,6 +436,17 @@ with sync_playwright() as pw:
     p.click(".brand-card >> nth=0")
     p.wait_for_timeout(400)
     check("brand 4P + SWOT + channels", p.locator(".mix").count() == 4 and p.locator(".swot-grid .swot").count() == 4 and p.locator("text=کانال‌های فروش برند").count() == 1)
+    # «استراتژی و بیزینس پلن»: answers → tabbed plan with the 9-block canvas, ads and a 12-month projection
+    p.click(".st-hero button")
+    p.fill("dialog input >> nth=3", "۲۰ میلیون")
+    p.click("dialog button:has-text('ساخت برنامه')")
+    p.wait_for_timeout(500)
+    r = calls(p, "brand_strategy")
+    check("brand_strategy", r and r[-1]["inputs"]["budget"] == 20_000_000, r)
+    p.click(".st-tabs >> text=بوم کسب‌وکار")
+    check("strategy canvas", p.locator(".st-canvas .st-block:visible").count() == 9)
+    p.click(".st-tabs >> text=پیش‌بینی مالی")
+    check("strategy finance", p.locator(".st-fin tbody tr:visible").count() == 12)
 
     # ---- customer: online login needs consent; mega-bank import ----
     p.goto(f"{BASE}?edition=customer&lic=invalid#/dashboard")

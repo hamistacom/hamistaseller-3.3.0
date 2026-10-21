@@ -1412,3 +1412,59 @@ tr.dim td { opacity: .55; }
 .pb.p-web i { background: #3b6ef0; }
 .src-chips.muted-off { opacity: 0.45; }
 .mkt-site { display: grid; gap: 4px; max-width: 720px; }
+
+/* «استراتژی و بیزینس پلن» (pages/strategy.js) */
+.st-hero { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; background: linear-gradient(135deg, var(--accent-soft), var(--surface) 70%); }
+.st-hero .ic-box.lg { width: 48px; height: 48px; border-radius: 14px; color: var(--accent); }
+.st-report { display: grid; gap: 16px; }
+.st-cover { display: flex; align-items: flex-end; gap: 16px; padding: 20px 22px; border-radius: 16px; background: linear-gradient(135deg, #15171c, #343a46); color: #fff; }
+.st-cover h1 { margin: 0; font-size: 26px; font-weight: 600; }
+.st-cover .label-t, .st-cover .muted { color: inherit; opacity: .75; }
+.st-tabs { flex-wrap: wrap; width: auto; }
+.st-print-h { display: none; }
+.st-panel { display: grid; gap: 14px; }
+.st-prose p { margin: 0 0 8px; line-height: 1.9; }
+.st-list { margin: 0; padding-inline-start: 18px; display: grid; gap: 4px; line-height: 1.75; }
+.st-blocks { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.st-block { border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; background: var(--surface-2); break-inside: avoid; }
+.st-block h3 { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+.st-evidence { border-inline-start: 3px solid var(--accent); padding-inline-start: 12px; display: grid; gap: 4px; }
+.st-canvas { display: grid; gap: 8px; grid-template-columns: repeat(10, minmax(0, 1fr)); grid-template-areas: "kp kp ka ka vp vp cr cr cs cs" "kp kp kr kr vp vp ch ch cs cs" "co co co co co rv rv rv rv rv"; }
+.st-canvas .st-block { font-size: 12.5px; }
+.cv-partners { grid-area: kp; } .cv-activities { grid-area: ka; } .cv-resources { grid-area: kr; } .cv-value { grid-area: vp; background: var(--accent-soft); color: var(--md-on-secondary-container, inherit); }
+.cv-relations { grid-area: cr; } .cv-channels { grid-area: ch; } .cv-segments { grid-area: cs; } .cv-costs { grid-area: co; } .cv-revenue { grid-area: rv; }
+.st-ads td { vertical-align: top; }
+.st-ads td:first-child { width: 34%; }
+.st-share { display: flex; align-items: center; gap: 6px; }
+.st-share .track { flex: 1; height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; min-width: 40px; }
+.st-share .track i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 999px; transition: width .6s; }
+.st-fin td { font-variant-numeric: tabular-nums; }
+.st-fin td.neg { color: var(--bad); } .st-fin td.pos { color: var(--ok); }
+.st-road { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.st-road > li { display: flex; gap: 14px; border: 1px solid var(--line); border-radius: 14px; padding: 14px; break-inside: avoid; }
+.st-road h3 { margin: 0; font-size: 15px; }
+.st-step { flex: none; width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--accent); color: #1c1203; font-weight: 600; }
+.st-foot { margin: 0; }
+@media (max-width: 1100px) {
+  .st-canvas { grid-template-columns: minmax(0, 1fr); grid-template-areas: none; }
+  .st-canvas .st-block { grid-area: auto; }
+}
+/* «چاپ / PDF»: only a copy of the plan, every section one after another */
+.print-sheet { display: none; }
+@media print {
+  body.printing { background: #fff; height: auto; overflow: visible; }
+  body.printing > :not(.print-sheet) { display: none !important; }
+  body.printing .print-sheet { display: block; }
+  .print-sheet .st-report, .print-sheet .st-panel { display: block; border: 0; box-shadow: none; padding: 0; }
+  .print-sheet .st-report > * + *, .print-sheet .st-panel > * + * { margin-top: 12px; }
+  .print-sheet .st-tools { display: none; }
+  .print-sheet .st-print-h { display: block; margin: 12px 0 0; break-after: avoid; }
+  .print-sheet .st-panel + .st-panel { break-before: page; }
+  .print-sheet .st-blocks, .print-sheet .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .print-sheet .table-wrap { overflow: visible; }
+  .print-sheet .t th { position: static; }
+  .print-sheet .st-canvas { grid-template-columns: repeat(10, minmax(0, 1fr)); grid-template-areas: "kp kp ka ka vp vp cr cr cs cs" "kp kp kr kr vp vp ch ch cs cs" "co co co co co rv rv rv rv rv"; }
+  .print-sheet .st-canvas .cv-partners { grid-area: kp; } .print-sheet .st-canvas .cv-activities { grid-area: ka; } .print-sheet .st-canvas .cv-resources { grid-area: kr; } .print-sheet .st-canvas .cv-value { grid-area: vp; }
+  .print-sheet .st-canvas .cv-relations { grid-area: cr; } .print-sheet .st-canvas .cv-channels { grid-area: ch; } .print-sheet .st-canvas .cv-segments { grid-area: cs; } .print-sheet .st-canvas .cv-costs { grid-area: co; } .print-sheet .st-canvas .cv-revenue { grid-area: rv; }
+  .print-sheet .st-cover, .print-sheet .st-step, .print-sheet .cv-value { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

@@ -476,6 +476,15 @@ pub async fn brand_analyze(app: AppHandle, state: State<'_, AppState>, id: i64, 
     run_job(Some(&app), &state, job, work, |r| Ok(format!("اعتماد داده {}٪", r.confidence))).await
 }
 
+/// «استراتژی و بیزینس پلن»: saves the owner's answers and builds the plan from them and the
+/// brand's last analysis (offline, instant).
+#[tauri::command]
+pub async fn brand_strategy(state: State<'_, AppState>, id: i64, inputs: crate::strategy::Inputs) -> Res<crate::strategy::Strategy> {
+    let b = state.db.brands()?.into_iter().find(|b| b.id == id).ok_or("برند پیدا نشد.")?;
+    state.db.brand_plan_save(id, &inputs)?;
+    Ok(crate::strategy::build(&b, &inputs))
+}
+
 #[tauri::command]
 pub async fn brand_runs(state: State<'_, AppState>) -> Res<Vec<crate::brand::BrandRunRow>> {
     state.db.brand_runs(200)

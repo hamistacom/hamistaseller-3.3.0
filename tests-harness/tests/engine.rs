@@ -533,6 +533,14 @@ async fn market_search_end_to_end() {
     assert_eq!(rep.market.offers, 2);
     assert!(rep.market.price_index > 0.0 && rep.presence.is_some());
     assert!(db.brands().unwrap()[0].report.is_some(), "report stored");
+    // strategy: the owner's answers are kept (schema v12) and the plan is built on the live analysis
+    let inp = harness::strategy::Inputs { budget: 20_000_000, unit_cost: 300_000, ..Default::default() };
+    db.brand_plan_save(id, &inp).unwrap();
+    let b = db.brands().unwrap().remove(0);
+    assert_eq!(b.plan.as_ref(), Some(&inp));
+    let st = harness::strategy::build(&b, &inp);
+    assert!(st.sector.contains("غذایی") && st.canvas.len() == 9, "{}", st.sector);
+    assert!(st.finance.price > 0 && st.finance.months.len() == 12 && st.evidence.iter().any(|e| e.contains("عرضه")), "{:?}", st.evidence);
     assert_eq!(r2.source_history.len(), 2, "one median per source for today");
     // daily watchlist: a watched product is re-analysed into its own history
     use harness::watch;

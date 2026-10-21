@@ -22,6 +22,7 @@ mod neshan;
 mod outreach;
 mod products;
 mod scanner;
+mod strategy;
 mod schedule;
 mod secrets;
 mod sources;
@@ -354,6 +355,7 @@ fn main() {
             commands::brand_save,
             commands::brand_delete,
             commands::brand_analyze,
+            commands::brand_strategy,
             commands::export_data,
             commands::import_data,
             commands::job_current,

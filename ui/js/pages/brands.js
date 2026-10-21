@@ -3,6 +3,7 @@
 import { h, icon, invoke, fa, clear, safe, input, field, toggle, toast, modal, confirmBox, ago, newChannel } from "../core.js";
 import { pbadge, confBadge } from "./market.js";
 import { go } from "../state.js";
+import { strategyCard } from "./strategy.js";
 
 const PILLARS = [
   ["presence", "حضور در بازار", "سهم از عرضه‌ها و تعداد پلتفرم‌ها در جستجوهای «محصول و قیمت»"],
@@ -282,7 +283,7 @@ function storeCard(st) {
 
 function detail(b, own, edit) {
   const r = b.report;
-  if (!r) return h("div", { class: "card" }, h("div", { class: "empty" }, icon("award", "lg"), h("b", {}, `«${b.name}» هنوز تحلیل نشده است`), h("span", { class: "small" }, "«تحلیل» را روی کارت برند بزنید.")));
+  if (!r) return h("div", { class: "stack" }, h("div", { class: "card" }, h("div", { class: "empty" }, icon("award", "lg"), h("b", {}, `«${b.name}» هنوز تحلیل نشده است`), h("span", { class: "small" }, "«تحلیل» را روی کارت برند بزنید."))), strategyCard(b));
   const m = r.market || {};
   const s = r.site || {};
   const check = (ok, label) => h("div", { class: `chk ${ok ? "ok" : "no"}` }, icon(ok ? "check" : "x", "sm"), label);
@@ -389,6 +390,7 @@ function detail(b, own, edit) {
       h("div", { class: "card stack swot thr" }, h("div", { class: "card-h" }, icon("shield"), h("h2", {}, "تهدیدها (T)")), (r.threats || []).length ? r.threats.map((t) => h("p", {}, t)) : h("p", { class: "muted small" }, "تهدید جدی دیده نشد.")),
     ),
     h("div", { class: "card stack swot act" }, h("div", { class: "card-h" }, icon("target"), h("h2", {}, "اقدام‌های پیشنهادی")), h("ol", { class: "acts" }, r.actions.map((t) => h("li", {}, t)))),
+    strategyCard(b),
   );
 }
 

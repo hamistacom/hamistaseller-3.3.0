@@ -26,6 +26,7 @@
 #[path = "../../src-tauri/src/links.rs"] pub mod links;
 #[path = "../../src-tauri/src/web.rs"] pub mod web;
 #[path = "../../src-tauri/src/products.rs"] pub mod products;
+#[path = "../../src-tauri/src/strategy.rs"] pub mod strategy;
 
 pub fn log_line(_: &str, _: &str) {}
 
