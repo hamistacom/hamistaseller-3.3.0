@@ -172,7 +172,7 @@ pub fn kind(platform: &str, url: &str) -> Kind {
     }
 }
 
-const RESERVED_BASALAM: &[&str] = &[
+pub(crate) const RESERVED_BASALAM: &[&str] = &[
     "search",
     "accounts",
     "cart",

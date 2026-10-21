@@ -1405,3 +1405,10 @@ tr.dim td { opacity: .55; }
 .spin-dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; display: inline-block; animation: spin .7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin-dot { animation: none; } }
+
+/* «دریافت لیست محصول» */
+.pl-pic { display: block; width: 52px; height: 52px; border-radius: 10px; object-fit: cover; background: var(--md-surface-container, rgba(127, 127, 127, 0.12)); }
+.t td.nowrap, .t .nowrap { white-space: nowrap; }
+.pb.p-web i { background: #3b6ef0; }
+.src-chips.muted-off { opacity: 0.45; }
+.mkt-site { display: grid; gap: 4px; max-width: 720px; }

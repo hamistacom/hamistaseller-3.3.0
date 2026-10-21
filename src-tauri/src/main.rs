@@ -20,6 +20,7 @@ mod logic;
 mod market;
 mod neshan;
 mod outreach;
+mod products;
 mod scanner;
 mod schedule;
 mod secrets;
@@ -321,6 +322,8 @@ fn main() {
             commands::scan_resume,
             commands::browser_detect,
             commands::wait_skip,
+            commands::product_list,
+            commands::product_list_export,
             commands::campaign_run,
             commands::template_preview,
             commands::assist_open,

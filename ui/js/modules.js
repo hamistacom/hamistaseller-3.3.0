@@ -30,6 +30,7 @@ export const PAGES = [
   { id: "market", space: "market", group: "تحلیل محصول", title: "تحلیل محصول و قیمت", sub: "برای فروشنده: قیمت روز، رقبا و قیمت پیشنهادی · برای خریدار: بهترین جای خرید · برندها، کانال‌های فروش و روند قیمت", icon: "trend", editions: USER, load: load("market") },
   { id: "watch", space: "market", group: "تحلیل محصول", title: "پایش روزانه قیمت", sub: "کالاهای مهم هر روز خودکار تحلیل می‌شوند: نوسان، روند ۷ و ۳۰ روزه، نمودار هر منبع و هشدار تغییر قیمت", icon: "bell", editions: USER, load: load("watch") },
   { id: "catalog", space: "market", group: "تحلیل محصول", title: "کالاهای من", sub: "فهرست کالاهای خودتان از اکسل؛ هر کالا دقیق در بازار شناسایی و قیمتش با بازار مقایسه می‌شود", icon: "store", editions: USER, load: load("watch", "renderCatalog") },
+  { id: "plist", space: "market", group: "تحلیل محصول", title: "دریافت لیست محصول", badge: "جدید", sub: "لیست کامل محصولات هر سایت، غرفه باسلام یا کانال تلگرام با عکس، لینک، قیمت و جزئیات — با خروجی اکسل", icon: "download", editions: USER, load: load("plist") },
   { id: "market-runs", space: "market", group: "تحلیل محصول", title: "تحلیل‌های قبلی", sub: "همه تحلیل‌های محصول و روند قیمت هر کالا", icon: "history", editions: USER, load: load("market", "renderRuns") },
   // ---------- brand analysis ----------
   { id: "brands", space: "brand", group: "تحلیل برند", title: "برند ما و رقبا", sub: "سلامت برند، آمیخته بازاریابی (4P)، SWOT، کانال‌های فروش، رقبا و اقدام‌های اجرایی", icon: "award", editions: USER, load: load("brands") },

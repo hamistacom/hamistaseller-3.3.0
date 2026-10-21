@@ -24,7 +24,7 @@ srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(H, dir
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 BASE = f"http://127.0.0.1:{srv.server_address[1]}/index.html"
 SRC = {}
-PAGES = ["dashboard", "scan", "schedule", "contacts", "outreach", "assist", "market", "market-runs", "watch", "catalog", "ai", "brands", "history", "help", "settings"]
+PAGES = ["dashboard", "scan", "schedule", "contacts", "outreach", "assist", "market", "plist", "market-runs", "watch", "catalog", "ai", "brands", "history", "help", "settings"]
 SIZES = [(1100, 680), (1366, 768), (1920, 1080)]
 problems = []
 

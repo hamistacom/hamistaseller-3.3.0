@@ -299,6 +299,28 @@ pub async fn wait_skip() -> Res<()> {
     Ok(())
 }
 
+/// «دریافت لیست محصول»: every product of a shop / booth / site / Telegram channel link.
+#[tauri::command]
+pub async fn product_list(app: AppHandle, state: State<'_, AppState>, req: crate::products::ListReq, on_event: Channel<ScanEvent>) -> Res<crate::products::ListReport> {
+    license::ensure(&state.db)?;
+    let job = state.jobs.start("plist", &format!("دریافت لیست محصول {}", crate::links::host(&crate::products::normalize(&req.url))), false)?;
+    let (s, profile) = market_settings(&state);
+    let token = job.token.clone();
+    let page = emitter(on_event);
+    let emit = tee(&state.jobs, job.id, &page);
+    let work = crate::products::run(&s, &profile, &req, &token, &emit);
+    run_job(Some(&app), &state, job, work, |r| Ok(format!("{} محصول دریافت شد", r.items.len()))).await
+}
+
+/// The product list as an Excel file in Downloads/HamistaSeller; returns its path.
+#[tauri::command]
+pub async fn product_list_export(app: AppHandle, state: State<'_, AppState>, report: crate::products::ListReport) -> Res<String> {
+    let dir = app.path().download_dir().unwrap_or_else(|_| state.dir.join("exports")).join("HamistaSeller");
+    let path = crate::products::export_xlsx(&report, &dir)?;
+    state.db.log("export", &format!("لیست محصول {} ({} مورد) به اکسل", report.url, report.items.len()));
+    Ok(path)
+}
+
 /// Path of the Edge / Chrome the scanner will use (`custom` first), or null.
 #[tauri::command]
 pub async fn browser_detect(custom: String) -> Res<Option<String>> {

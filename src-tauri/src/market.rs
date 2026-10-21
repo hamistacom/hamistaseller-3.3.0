@@ -29,7 +29,7 @@ pub struct Platform {
     /// classifieds' city slug.
     page: &'static str,
     /// Prices the platform shows in Rial (÷10 → Toman).
-    rial: bool,
+    pub rial: bool,
     per_page: usize,
     sorts: &'static [(&'static str, &'static str)],
     /// Autocomplete API: the platform's own popular / related searches.
@@ -1721,7 +1721,7 @@ fn scenario_url(db: &Db, id: &str, which: &str) -> Option<String> {
         .map(String::from)
 }
 
-const PAGE_JS: &str = r#"
+pub(crate) const PAGE_JS: &str = r#"
 const out = [];
 const nd = document.getElementById('__NEXT_DATA__');
 if (nd) { try { out.push(JSON.parse(nd.textContent)); } catch (e) {} }
@@ -1763,11 +1763,11 @@ return {
 
 #[derive(Deserialize, Default, Debug, PartialEq)]
 #[serde(default)]
-struct PageData {
-    blocked: bool,
-    login: bool,
-    cards: usize,
-    data: Vec<Value>,
+pub(crate) struct PageData {
+    pub blocked: bool,
+    pub login: bool,
+    pub cards: usize,
+    pub data: Vec<Value>,
 }
 
 fn page_offers(d: &PageData, p: &Platform) -> Vec<Offer> {
@@ -2073,6 +2073,8 @@ pub struct MarketReq {
     pub mode: String,
     /// Also search the web (top 3 organic results) for this product.
     pub web: bool,
+    /// «منبع دلخواه»: one site / booth / page / Telegram channel; when set, every offer comes from it.
+    pub site: String,
 }
 
 impl Default for MarketReq {
@@ -2093,6 +2095,7 @@ impl Default for MarketReq {
             local_only: false,
             mode: "seller".into(),
             web: false,
+            site: String::new(),
         }
     }
 }
@@ -2106,9 +2109,10 @@ pub async fn search(db: &Db, s: &Settings, profile: &Path, req: &MarketReq, toke
     if req.max_price > 0 && req.min_price > req.max_price {
         return Err("در محدوده قیمت، «از» بزرگ‌تر از «تا» است.".into());
     }
+    let only_site = !req.site.trim().is_empty();
     let chosen: Vec<&Platform> = PLATFORMS
         .iter()
-        .filter(|p| req.platforms.is_empty() || req.platforms.iter().any(|x| x == p.id))
+        .filter(|p| !only_site && (req.platforms.is_empty() || req.platforms.iter().any(|x| x == p.id)))
         .collect();
     // one or more products / alternatives to search («عسل یک کیلویی + شهد آزادی», «عسل -موم»)
     let groups = parse_query(query);
@@ -2123,6 +2127,21 @@ pub async fn search(db: &Db, s: &Settings, profile: &Path, req: &MarketReq, toke
     let mut all: Vec<Offer> = vec![];
     let mut status = vec![];
     let mut eng: Option<scanner::Engine> = None;
+    // «وب» first: brands' own sites and reputable shops (or only the user's own source)
+    if (only_site || req.platforms.iter().any(|x| x == "web")) && !token.is_cancelled() {
+        let what = if only_site { format!("منبع دلخواه {}", req.site.trim()) } else { "سایت برندها و فروشگاه‌های معتبر".into() };
+        scanner::status(emit, format!("جستجوی «{query}» در {what}…"));
+        let phrase = groups.first().map(search_phrase).unwrap_or_else(|| query.to_string());
+        let (found, err) = crate::web::shop_offers(s, profile, &phrase, &req.site, req.limit.max(10) as usize, token, emit).await;
+        let relevant = found.iter().filter(|o| matches_groups(&o.title, &groups, req.exact)).count();
+        let line = match &err {
+            Some(e) => e.clone(),
+            None => format!("وب: {relevant} پیشنهاد مرتبط از {} محصول خوانده‌شده", found.len()),
+        };
+        scanner::log(emit, if relevant > 0 { "success" } else { "warning" }, line);
+        status.push(("web".to_string(), relevant, err.filter(|_| relevant == 0).unwrap_or_default()));
+        all.extend(found);
+    }
     for (i, p) in chosen.iter().enumerate() {
         if token.is_cancelled() {
             break;
@@ -2177,7 +2196,7 @@ pub async fn search(db: &Db, s: &Settings, profile: &Path, req: &MarketReq, toke
     // web sources (top 3) and B2B suppliers, while the browser is still open
     let wholesale = req.mode == "wholesale";
     let (mut web, mut suppliers) = (vec![], vec![]);
-    if (req.web || wholesale) && !token.is_cancelled() {
+    if (req.web || wholesale) && !only_site && !token.is_cancelled() {
         if eng.is_none() {
             eng = scanner::launch(s, profile, s.headless, 0).await.ok();
         }

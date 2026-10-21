@@ -9,6 +9,7 @@ import { PROVINCES } from "../data.js";
 
 // id, name, monogram, has a sign-in page, is a classifieds site (asking prices of public ads)
 const PLATFORMS = [
+  ["web", "وب", "و", false, false],
   ["torob", "ترب", "ت", false, false],
   ["digikala", "دیجی‌کالا", "د", true, false],
   ["basalam", "باسلام", "ب", true, false],
@@ -21,6 +22,7 @@ const PMONO = Object.fromEntries(PLATFORMS.map((p) => [p[0], p[2]]));
 const CLASSIFIED = new Set(PLATFORMS.filter((p) => p[4]).map((p) => p[0]));
 // how a buyer actually gets the product on each platform
 const METHOD = {
+  web: "سایت خود برند و فروشگاه‌های معتبر (ترجیحاً دارای اینماد)",
   torob: "فروشگاه اینترنتی",
   emalls: "فروشگاه اینترنتی",
   digikala: "آنلاین با ضمانت",
@@ -413,9 +415,17 @@ function brandBox(value = "") {
 
 export async function render(root, params, actions) {
   let mode = remember("mktMode") || "seller";
-  let platforms = new Set((remember("mktPlatforms") || "torob,digikala,basalam,emalls").split(",").filter((p) => PNAME[p]));
+  let platforms = new Set((remember("mktPlatforms") || "web,torob,digikala,basalam,emalls").split(",").filter((p) => PNAME[p]));
+  if (remember("mktWeb") === "1") platforms.add("web"); // the old separate «وب» switch
   let exact = remember("mktExact") !== "0";
-  let webOn = remember("mktWeb") !== "0";
+  // «منبع دلخواه»: one site / booth / channel; every field then comes from that source only
+  const site = input({ class: "input ltr", placeholder: "https://… سایت، غرفه باسلام یا کانال تلگرام (اختیاری)", value: remember("mktSite") || "" });
+  const siteHint = h("span", { class: "small muted" });
+  const syncSite = () => {
+    siteHint.textContent = site.value.trim() ? "همه اطلاعات (محصول، قیمت، فروشنده، برند…) فقط از همین منبع خوانده می‌شود؛ منابع دیگر کنار می‌روند." : "خالی = منابع انتخاب‌شده در پایین.";
+    plat.classList.toggle("muted-off", !!site.value.trim());
+  };
+  site.addEventListener("input", syncSite);
   const q = input({ placeholder: "نام دقیق کالا؛ چند کالا با «+» یا «یا»، حذف با «-» (مثلاً: عسل یک کیلویی + شهد آزادی -موم)", value: params.q || remember("mktQuery") || "" });
   const brand = brandBox(params.brand || "");
   const margin = input({ type: "number", min: 0, max: 300, dir: "ltr", value: remember("mktMargin") || 25 });
@@ -464,7 +474,7 @@ export async function render(root, params, actions) {
             {
               type: "button",
               "aria-pressed": platforms.has(id) ? "true" : "false",
-              title: cls ? "قیمت آگهی‌های عمومی (اغلب دست‌دوم یا تولید خانگی)؛ عنوان، قیمت، عکس، شهر و زمان آگهی خوانده می‌شود" : METHOD[id],
+              title: id === "web" ? "سایت خود برندها و فروشگاه‌های معتبر (اول اینماد و داده ساخت‌یافته)؛ می‌تواند تنها منبع باشد" : cls ? "قیمت آگهی‌های عمومی (اغلب دست‌دوم یا تولید خانگی)؛ عنوان، قیمت، عکس، شهر و زمان آگهی خوانده می‌شود" : METHOD[id],
               onclick: () => {
                 platforms.has(id) && platforms.size > 1 ? platforms.delete(id) : platforms.add(id);
                 drawPlat();
@@ -490,33 +500,11 @@ export async function render(root, params, actions) {
       ),
     );
   drawPlat();
+  syncSite();
   const signIn = async (id, name) => {
     toast(`پنجره ورود ${name} باز شد؛ وارد حساب شوید و پنجره را ببندید. ورود شما برای جستجوهای بعدی می‌ماند.`, "ok");
     await safe(invoke("market_login", { platform: id }));
   };
-  // «وب»: up to 3 top organic results (always on in B2B mode)
-  const webChip = () => {
-    const wrap = h("span", { class: `src-chip web ${webOn ? "on" : ""}`.trim() });
-    const draw = () =>
-      clear(
-        wrap,
-        h(
-          "button",
-          {
-            type: "button",
-            "aria-pressed": webOn ? "true" : "false",
-            title: "حداکثر ۳ نتیجه معتبر از وب (سایت‌های رسمی، تولیدکننده و فروشگاه)",
-            onclick: () => { webOn = !webOn; draw(); },
-          },
-          h("span", { class: "pb p-web" }, h("i", { "aria-hidden": "true" }, "و")),
-          h("span", {}, "وب"),
-          webOn ? icon("check", "sm") : null,
-        ),
-      );
-    draw();
-    return wrap;
-  };
-
   const go_ = h("button", { class: "btn primary big", type: "button" }, icon("trend", "sm"), "تحلیل");
   const progress = h("div", { class: "mkt-progress", hidden: true });
   const out = h("div", { class: "stack" });
@@ -548,6 +536,7 @@ export async function render(root, params, actions) {
     remember("mktQuery", query);
     remember("mktMargin", margin.value);
     remember("mktPlatforms", [...platforms].join(","));
+    remember("mktSite", site.value.trim());
     remember("mktMin", minP.value);
     remember("mktMax", maxP.value);
     remember("mktLimit", limit.value);
@@ -597,9 +586,10 @@ export async function render(root, params, actions) {
       district: district.value.trim(),
       localOnly: localOnly.checked,
       mode,
-      web: webOn || mode === "wholesale",
+      web: platforms.has("web") || mode === "wholesale",
+      site: site.value.trim(),
     };
-    remember("mktWeb", webOn ? "1" : "0");
+    remember("mktWeb", "");
     const rep = await safe(invoke("market_search", { req, onEvent: ch }));
     go_.disabled = false;
     go_.removeAttribute("aria-busy");
@@ -654,7 +644,8 @@ export async function render(root, params, actions) {
           h("div", { class: "mkt-row2" }, field("استان", prov), field("شهر", city), field("محله / منطقه", district), h("label", { class: "check" }, localOnly, h("span", {}, "فقط فروشندگان همین منطقه"))),
           regionHint,
         ),
-        h("div", { class: "row wrap" }, h("span", { class: "label-t" }, "منابع:"), plat, webChip()),
+        h("div", { class: "row wrap" }, h("span", { class: "label-t" }, "منابع:"), plat),
+        h("div", { class: "mkt-site" }, field("منبع دلخواه (لینک)", site), siteHint),
         progress,
       ),
       out,

@@ -293,6 +293,16 @@
     catalog_delete: () => null,
     catalog_check: async () => ({ message: "۲ کالا بررسی شد" }),
     market_login: () => null,
+    wait_skip: () => null,
+    product_list: async (a) => {
+      await sleep(200);
+      const items = [
+        { title: "عسل گون طبیعی یک کیلویی", price: 450000, image: "", url: "https://basalam.com/asal_shop/product/1", seller: "عسل شاپ", sellerUrl: "https://basalam.com/asal_shop", brand: "عسل شاپ", rating: 4.6, reviews: 38, sales: 120, date: "2026-10-01 10:00:00", location: "اصفهان", availability: "موجود", description: "", views: 0, link: "", source: "basalam.com" },
+        { title: "عسل کنار نیم کیلویی", price: 220000, image: "", url: "https://basalam.com/asal_shop/product/2", seller: "عسل شاپ", sellerUrl: "https://basalam.com/asal_shop", brand: "", rating: null, reviews: 0, sales: 0, date: "", location: "", availability: "", description: "", views: 0, link: "", source: "basalam.com" },
+      ];
+      return { url: a.req.url, scope: "فقط محصولات غرفه «asal_shop» در باسلام (نه کل باسلام)", items, pages: 2, stats: { count: 2, priced: 2, min: 220000, median: 335000, max: 450000, avg: 335000, sellers: [["عسل شاپ", 2]], brands: [["عسل شاپ", 1]], newest: "2026-10-01 10:00:00", oldest: "2026-10-01 10:00:00", perWeek: 0 }, notes: ["۳ مورد خارج از محدوده لینک کنار گذاشته شد."] };
+    },
+    product_list_export: () => "C:\\Users\\me\\Downloads\\HamistaSeller\\products-basalam-com.xlsx",
     brand_runs: () => (empty ? [] : [[3, 1, "خوانسار", 75, nowUtc(120)], [2, 2, "شهدینه", 61, nowUtc(200)], [1, 1, "خوانسار", 70, nowUtc(9000)]]),
     brand_run_get: () => mkBrands[0]?.report,
     city_photo: () => "",
