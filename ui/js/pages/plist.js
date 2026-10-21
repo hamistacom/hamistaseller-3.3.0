@@ -1,7 +1,7 @@
 // «دریافت لیست محصول»: every product (photo, name, price, link, seller, brand, rating, date …) of
 // a shop link — a Basalam booth (that booth only), a whole site (its home page), one category page or
 // a public Telegram channel — with a short analysis and an Excel file.
-import { h, icon, invoke, fa, clear, safe, input, toast, newChannel, skipWaitButton, select, toggle } from "../core.js";
+import { h, icon, invoke, fa, clear, safe, input, field, toast, newChannel, skipWaitButton, select, toggle } from "../core.js";
 
 const toman = (n) => (n > 0 ? `${fa(n)} تومان` : "—");
 const remember = (k, v) => {
@@ -37,8 +37,8 @@ function scopeHint(raw) {
   return `همین صفحه از ${host} و صفحه‌های «بعدی» آن؛ فقط لینک‌های خود ${host}.`;
 }
 
-export async function render(root) {
-  const url = input({ class: "input ltr", placeholder: "https://basalam.com/… یا آدرس هر فروشگاه / کانال تلگرام", value: remember("plistUrl") || "" });
+export async function render(root, params = {}) {
+  const url = input({ class: "input ltr", placeholder: "https://basalam.com/… یا آدرس هر فروشگاه / کانال تلگرام", value: params.url || remember("plistUrl") || "" });
   const query = input({ placeholder: "فقط این محصولات (اختیاری)، مثلاً عسل -موم", value: remember("plistQuery") || "" });
   const limit = select([100, 300, 600, 1000, 2000, 3000].map((n) => [n, `تا ${fa(n)} محصول`]), Number(remember("plistLimit")) || 300, { class: "input" });
   const pages = select([[0, "صفحه‌ها: خودکار"], ...[3, 5, 10, 20, 40, 60].map((n) => [n, `تا ${fa(n)} صفحه`])], Number(remember("plistPages")) || 0, { class: "input" });
@@ -201,7 +201,7 @@ export async function render(root) {
         { class: "card" },
         h("div", { class: "row wrap" }, h("div", { class: "grow" }, url), go_),
         hint,
-        h("div", { class: "row wrap" }, query, limit, pages),
+        h("div", { class: "mkt-row2" }, field("فیلتر نام محصول", query), field("حداکثر محصول", limit), field("حداکثر صفحه", pages)),
         details.el,
         h(
           "div",

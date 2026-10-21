@@ -25,6 +25,7 @@ Tauri 2 (Rust)  ──invoke/Channel──  UI (vanilla ES modules, RTL, بدو�
 | `commands.rs` | همه دستورهای قابل فراخوانی از UI. کارهای طولانی با «مدیر عملیات» (`jobs.rs`) اجرا می‌شوند: `run_job` کار را در `scanner::JOB_ID` می‌پیچد، پنیک را مهار می‌کند و با نتیجه می‌بندد. کمک‌تابع `tee` رویدادها را هم به وضعیت کار و هم به صفحه می‌فرستد |
 | `jobs.rs` | **مدیر عملیات**: هر کار یک `Job` با شناسه، وضعیت (`running`/`waiting_for_user`/`cancelling`/`completed`/`partial`/…)، پیشرفت و `توقف` مستقل. چند کار هم‌زمان (`MAX_JOBS`)، کارهای حساس (`scan`/`campaign`/`watch`/`catalog`) تک‌نمونه. تغییر هر کار با رویداد `job-update` به UI می‌رود. تابع خالص، با تست `lifecycle` |
 | `links.rs` | **لینک سطح‌موجودیت**: از داده هر پلتفرم لینک «همان کالا» و «همان فروشنده» را می‌سازد (`from_json`)، لینک را پاک و مطلق می‌کند (`canonical`)، نوع آن را می‌شناسد (`kind`) و تأیید می‌کند (`check` → `exact`/`unverified`). هرگز لینک حدسی تولید نمی‌شود |
+| `products.rs` | **دریافت لیست محصول**: `scope_of` محدوده را از لینک می‌سازد (`Booth` = فقط غرفه باسلام، `Site{whole}` = کل سایت یا یک صفحه، `Sites` = چند فروشگاه برای منبع وب، `Telegram` = پست‌های کانال) و `Scope::keeps` هر محصول بیرون از آن را دور می‌اندازد. `crawl` با مرورگر برنامه و خواننده‌های موتور قیمت (`market::PAGE_JS` + `offers_in`) صفحه‌ها را می‌خواند، صفحه بعدی و (برای کل سایت) دسته‌ها را دنبال می‌کند و کپچا را با پنجره قابل رد کردن می‌گذراند. `telegram_posts` پست‌های `t.me/s/<name>` را می‌خواند و `price_from_text` قیمت نوشته‌شده را. `stats` و `export_xlsx` خلاصه و اکسل. تست واحد + تست مرورگر واقعی در `tests-harness/tests/products.rs` |
 | `web.rs` | **منابع وب و B2B**: تا ۳ نتیجه ارگانیک مرتبط، هر کدام با خواندن داده ساخت‌یافته صفحه (`parse_product`: JSON-LD → OpenGraph → meta)؛ طبقه‌بندی کیفیت منبع و تشخیص تأمین‌کننده (`classify_supplier`: تولیدکننده/عمده‌فروش/پخش/واردکننده/نمایندگی/خرده‌فروش) با سیگنال‌های واقعی؛ تولید متن استعلام (`rfq_text`). پارسرهای خالص با تست |
 | `db.rs` | اسکیمای SQLite و مهاجرت‌ها (`SCHEMA_VERSION = 10`)، همه کوئری‌ها |
 | `scanner.rs` | موتور استخراج: راه‌اندازی مرورگر (`Engine`, `launch`, `launch_in`)، ساخت کوئری از شهر/منطقه، `PLACE_JS` |
@@ -48,7 +49,8 @@ Tauri 2 (Rust)  ──invoke/Channel──  UI (vanilla ES modules, RTL, بدو�
   - `market_runs(id, query, qkey, brand, offers, median, min, report JSON, created_at)` با ایندکس `market_runs_q`: هر تحلیل قیمت، کامل. روند تاریخی از همین جدول (گروه‌بندی روزانه روی `qkey` با برند خالی) ساخته می‌شود.
   - `brands(id, name, own, website, instagram, category, note, report JSON, analyzed_at, created_at)`: فقط یک برند می‌تواند `own=1` باشد.
 - v9: `brand_runs(id, brand_id, name, overall, report, created_at)`: هر تحلیل برند برای تاریخچه.
-- نسخه فعلی پایگاه داده ۱۰ است (`SCHEMA_V10`: جدول‌های `watch` و `catalog`).
+- v10: جدول‌های `watch` و `catalog`.
+- نسخه فعلی پایگاه داده ۱۱ است (`SCHEMA_V11`: ستون `brands.store` برای فروشگاه خود برند).
 - مهاجرت جدید: `SCHEMA_V11` بنویسید، در `migrate` اضافه کنید و `SCHEMA_VERSION` را بالا ببرید. هرگز مهاجرت قبلی را عوض نکنید.
 
 ## ۴. موتور قیمت‌یابی (`market.rs`)
@@ -96,6 +98,14 @@ Tauri 2 (Rust)  ──invoke/Channel──  UI (vanilla ES modules, RTL, بدو�
 - `Offer`: `image`, `sales`, `updated`, `location`. از آگهی‌ها هرگز تماس خوانده نمی‌شود.
 - `brand::analyze`: `discover` (سایت/اینستاگرام از جستجو) → `market::search` دسته و برند → ممیزی → `score` → `enrich` (کانال، محصول، فروشنده، رقبا، 4P، فرصت/تهدید). تست `marketing_mix`.
 - فرمان‌های جدید: `brand_runs`, `brand_run_get`, `market_trends`, `market_login`.
+
+## ۵-ج. آماده بازار (به‌روزرسانی ۳٫۳)
+
+- **رد کردن انتظار:** فرمان `wait_skip` (به‌جای ترفند قبلی `browser_detect("__skip_wait__")`) پرچم `scanner::SKIP_WAIT` را می‌زند. همه حلقه‌های انتظار کاربر (`market::attended`، `products::attended`، `websearch::search_attended`، `scanner::solve_captcha`، ورود دیوار/شیپور/اینستاگرام/تلگرام) آن را می‌خوانند. دکمه مشترک UI: `skipWaitButton()` در `core.js`.
+- **پنجره سفید:** `launch_in` در حالت نمایان تب `about:blank` شروع را می‌بندد و `scanner::goto` تب در حال کار را `bring_to_front` می‌کند.
+- **منبع وب:** `MarketReq.site` و شناسه سکوی `"web"`؛ `web::shop_offers` (جستجوی فروشگاه‌ها با `search_shops` یا منبع کاربر → `products::crawl` → نشان اینماد با `has_enamad`). با `site` پر، هیچ سکوی دیگری خوانده نمی‌شود.
+- **برند کوچک:** `Brand.store` → `products::run` → `brand::store_of` (عدد) و `store_advice` (قوت/ضعف/اقدام، تابع خالص با تست). محصولات فروشگاه به‌عنوان کالاهای همین برند به `enrich` داده می‌شوند. `BrandReport.undefined` یعنی برند باید تعریف شود.
+- **تلگرام/اینستاگرام:** `logic::mentions_in_text` آیدی‌های `@` را می‌خواند؛ `telegram::audience` کانال و گروه را جدا می‌کند؛ لینک کانال/پیج در `Place.maps_url`. `sources::save` مخاطبی را که فقط آیدی پیام‌رسان (غیر از خود صفحه) دارد هم نگه می‌دارد.
 
 ## ۶. رابط کاربری (`ui/`)
 

@@ -20,6 +20,9 @@ pub struct Brand {
     pub instagram: String,
     pub category: String, // product searched in «محصول و قیمت» (e.g. «عسل»)
     pub note: String,
+    /// The brand's own store: a Basalam booth, a shop / category page or a Telegram channel. Small
+    /// brands that no search finds are defined by it (their real products, prices and reviews).
+    pub store: String,
     pub report: Option<BrandReport>,
     pub analyzed_at: String,
 }
@@ -108,6 +111,125 @@ pub struct BrandReport {
     pub candidates: Vec<Candidate>,
     /// Where each headline fact came from (brand/site/market/social), for «منبع این عدد؟».
     pub evidence: Vec<Evidence>,
+    /// The brand's own store, read product by product (when the brand defines one).
+    pub store: Option<Store>,
+    /// Nothing identified the brand: the user should define it (store / site / Instagram).
+    pub undefined: bool,
+}
+
+/// A brand's own store as read now: what it sells, at what prices, how buyers rate it.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Store {
+    pub url: String,
+    pub scope: String,
+    pub products: usize,
+    pub priced: usize,
+    pub min: i64,
+    pub median: i64,
+    pub max: i64,
+    pub rating: Option<f64>,
+    pub reviews: i64,
+    pub sales: i64,
+    /// Product titles that carry the brand name (findability in marketplace search).
+    pub named: usize,
+    pub with_photo: usize,
+    /// Store median ÷ category median × 100 (100 = market median), when the category was read.
+    pub price_index: Option<f64>,
+    pub error: String,
+}
+
+/// Reads the store into numbers (pure; `market_median` = the category's median, 0 = unknown;
+/// `per_kg`: that median is per kilogram / litre, so the store is compared per kilogram too).
+pub fn store_of(url: &str, scope: &str, items: &[crate::products::Item], brand: &str, market_median: i64, per_kg: bool) -> Store {
+    let st = crate::products::stats(items);
+    let rated: Vec<(f64, i64)> = items.iter().filter_map(|i| i.rating.map(|r| (r, i.reviews.max(1)))).collect();
+    let weight: i64 = rated.iter().map(|x| x.1).sum();
+    let bw = words(brand);
+    Store {
+        url: url.into(),
+        scope: scope.into(),
+        products: st.count,
+        priced: st.priced,
+        min: st.min,
+        median: st.median,
+        max: st.max,
+        rating: (weight > 0).then(|| (rated.iter().map(|(r, n)| r * *n as f64).sum::<f64>() / weight as f64 * 10.0).round() / 10.0),
+        reviews: items.iter().map(|i| i.reviews).sum(),
+        sales: items.iter().map(|i| i.sales).sum(),
+        named: items
+            .iter()
+            .filter(|i| {
+                let t = words(&i.title);
+                !bw.is_empty() && bw.iter().all(|w| t.iter().any(|x| crate::market::tok_eq(x, w)))
+            })
+            .count(),
+        with_photo: items.iter().filter(|i| !i.image.is_empty()).count(),
+        price_index: {
+            let mut ps: Vec<i64> = items
+                .iter()
+                .filter(|i| i.price > 0)
+                .filter_map(|i| if per_kg { crate::market::size_grams(&i.title).map(|g| (i.price as f64 * 1000.0 / g) as i64) } else { Some(i.price) })
+                .collect();
+            ps.sort_unstable();
+            (market_median > 0 && !ps.is_empty()).then(|| (crate::market::pct(&ps, 0.5) as f64 / market_median as f64 * 100.0).round())
+        },
+        error: String::new(),
+    }
+}
+
+/// Practical findings from the store: (strengths, weaknesses, actions), most useful first.
+pub fn store_advice(st: &Store, has_site: bool, has_insta: bool) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let (mut good, mut bad, mut todo) = (vec![], vec![], vec![]);
+    if st.products == 0 {
+        bad.push("از لینک فروشگاه برند محصولی خوانده نشد.".into());
+        todo.push("لینک غرفه یا صفحه محصولات را بررسی کنید (مثلاً https://basalam.com/نام-غرفه) و دوباره تحلیل کنید.".into());
+        return (good, bad, todo);
+    }
+    if st.products >= 25 {
+        good.push(format!("تنوع خوب: {} محصول در فروشگاه برند.", st.products));
+    } else if st.products < 8 {
+        bad.push(format!("تنوع کم: فقط {} محصول در فروشگاه.", st.products));
+        todo.push("سبد محصول را گسترش دهید: اندازه‌ها/وزن‌های مختلف، بسته‌های ترکیبی و هدیه، تا در جستجوهای بیشتری دیده شوید.".into());
+    }
+    match st.rating {
+        Some(r) if r >= 4.5 && st.reviews >= 20 => good.push(format!("رضایت عالی خریداران: {r} از ۵ با {} نظر.", st.reviews)),
+        Some(r) if r < 4.0 => {
+            bad.push(format!("امتیاز خریداران {r} از ۵ است."));
+            todo.push("نظرهای زیر ۴ را بخوانید و مشکل پرتکرار (کیفیت، بسته‌بندی، زمان ارسال) را اول حل کنید؛ به همه نظرها پاسخ بدهید.".into());
+        }
+        _ => {}
+    }
+    if st.reviews < 10 {
+        bad.push(format!("نظر خریدار کم است ({} نظر) و اعتماد خریدار تازه را پایین می‌آورد.", st.reviews));
+        todo.push("بعد از هر تحویل، با یک پیام کوتاه و محترمانه از خریدار نظر بخواهید؛ ۲۰ نظر اول بیشترین اثر را در فروش دارد.".into());
+    }
+    let named_pct = st.named * 100 / st.products.max(1);
+    if named_pct < 50 {
+        bad.push(format!("نام برند فقط در {named_pct}٪ عنوان محصولات آمده؛ جستجوی نام برند به محصولات شما نمی‌رسد."));
+        todo.push("الگوی عنوان: «نوع محصول + ویژگی اصلی + وزن/اندازه + نام برند» (مثلاً «عسل گون طبیعی ۱ کیلویی برند …»).".into());
+    } else {
+        good.push(format!("نام برند در {named_pct}٪ عنوان‌ها آمده و در جستجو دیده می‌شود."));
+    }
+    if st.with_photo * 100 / st.products.max(1) < 90 {
+        todo.push("برای همه محصولات عکس واقعی، روشن و با زمینه یکدست بگذارید؛ عکس اول بیشترین اثر را روی کلیک دارد.".into());
+    }
+    match st.price_index {
+        Some(p) if p > 125.0 => {
+            bad.push(format!("میانه قیمت فروشگاه {}٪ بالاتر از میانه بازار است.", (p - 100.0).round()));
+            todo.push("دلیل گرانی را در صفحه محصول نشان دهید (گواهی، آزمایش، اصالت، بسته‌بندی) یا یک محصول ورودی ارزان‌تر اضافه کنید.".into());
+        }
+        Some(p) if p < 85.0 => good.push(format!("قیمت رقابتی: میانه قیمت {}٪ پایین‌تر از بازار.", (100.0 - p).round())),
+        Some(_) => good.push("قیمت‌ها هم‌سطح میانه بازار است.".into()),
+        None => {}
+    }
+    if !has_site {
+        todo.push("یک سایت ساده با دامنه اختصاصی و نماد اعتماد (اینماد) بسازید؛ خریدار عمده و تأمین‌کننده اول سایت را بررسی می‌کند.".into());
+    }
+    if !has_insta {
+        todo.push("صفحه اینستاگرام برند را با همین نام بسازید و لینک غرفه را در بیو بگذارید؛ ویدیوی کوتاه از تولید/بسته‌بندی اعتماد می‌سازد.".into());
+    }
+    (good, bad, todo)
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -164,7 +286,7 @@ impl Db {
     pub fn brands(&self) -> Res<Vec<Brand>> {
         let c = self.c();
         let mut st = c
-            .prepare("SELECT id,name,own,website,instagram,category,note,report,analyzed_at FROM brands ORDER BY own DESC, id")
+            .prepare("SELECT id,name,own,website,instagram,category,note,report,analyzed_at,store FROM brands ORDER BY own DESC, id")
             .map_err(err)?;
         let rows = st
             .query_map([], |r| {
@@ -179,6 +301,7 @@ impl Db {
                     note: r.get(6)?,
                     report: serde_json::from_str(&rep).ok(),
                     analyzed_at: r.get(8)?,
+                    store: r.get(9)?,
                 })
             })
             .map_err(err)?;
@@ -203,21 +326,25 @@ impl Db {
             .next()
             .unwrap_or("")
             .to_string();
+        let store = b.store.trim();
+        if !store.is_empty() {
+            crate::products::scope_of(store)?; // a link we can read, or a clear message now
+        }
         let c = self.c();
         if b.own {
             c.execute("UPDATE brands SET own=0", []).map_err(err)?; // one «برند ما»
         }
         if b.id == 0 {
             c.execute(
-                "INSERT INTO brands(name,own,website,instagram,category,note) VALUES(?1,?2,?3,?4,?5,?6)",
-                rusqlite::params![name, b.own as i64, site, ig, b.category.trim(), b.note.trim()],
+                "INSERT INTO brands(name,own,website,instagram,category,note,store) VALUES(?1,?2,?3,?4,?5,?6,?7)",
+                rusqlite::params![name, b.own as i64, site, ig, b.category.trim(), b.note.trim(), store],
             )
             .map_err(err)?;
             Ok(c.last_insert_rowid())
         } else {
             c.execute(
-                "UPDATE brands SET name=?1,own=?2,website=?3,instagram=?4,category=?5,note=?6 WHERE id=?7",
-                rusqlite::params![name, b.own as i64, site, ig, b.category.trim(), b.note.trim(), b.id],
+                "UPDATE brands SET name=?1,own=?2,website=?3,instagram=?4,category=?5,note=?6,store=?7 WHERE id=?8",
+                rusqlite::params![name, b.own as i64, site, ig, b.category.trim(), b.note.trim(), store, b.id],
             )
             .map_err(err)?;
             Ok(b.id)
@@ -1063,6 +1190,62 @@ pub async fn analyze(
         )
         .await
     };
+    // the brand's own store (booth / shop / channel): its real products define a small brand
+    let mut store: Option<Store> = None;
+    let mut mine = mine;
+    if !b.store.trim().is_empty() && !token.is_cancelled() {
+        crate::scanner::status(emit, "خواندن محصولات فروشگاه خود برند…");
+        let req = crate::products::ListReq {
+            url: b.store.trim().into(),
+            limit: 300,
+            ..Default::default()
+        };
+        let (market_median, per_kg) = category.as_ref().map_or((0, false), |c| (c.stats.median, c.stats.basis == "per_kg"));
+        match crate::products::run(s, profile, &req, token, emit).await {
+            Ok(list) => {
+                store = Some(store_of(&list.url, &list.scope, &list.items, &b.name, market_median, per_kg));
+                // its products are this brand's products, whatever their titles say
+                let offers: Vec<crate::market::Offer> = list
+                    .items
+                    .iter()
+                    .filter(|i| i.price > 0)
+                    .map(|i| crate::market::Offer {
+                        platform: if crate::links::host(&i.url) == "basalam.com" { "basalam".into() } else { "web".into() },
+                        title: i.title.clone(),
+                        brand: b.name.trim().into(),
+                        price: i.price,
+                        seller: i.seller.clone(),
+                        rating: i.rating,
+                        reviews: i.reviews,
+                        url: i.url.clone(),
+                        image: i.image.clone(),
+                        sales: i.sales,
+                        updated: i.date.clone(),
+                        seller_url: i.seller_url.clone(),
+                        link: "exact".into(),
+                        ..Default::default()
+                    })
+                    .collect();
+                if !offers.is_empty() {
+                    mine = Some(match mine.take() {
+                        Some(mut m) => {
+                            m.offers.extend(offers);
+                            m
+                        }
+                        None => crate::market::analyze_opts(b.name.trim(), "", offers, 25.0, false),
+                    });
+                }
+            }
+            Err(e) => {
+                crate::scanner::log(emit, "warning", format!("فروشگاه برند: {e}"));
+                store = Some(Store {
+                    url: b.store.trim().into(),
+                    error: e,
+                    ..Default::default()
+                });
+            }
+        }
+    }
     crate::scanner::status(emit, "بررسی سایت و صفحه اینستاگرام…");
     let runs = db.market_recent(60)?;
     let m = market_of(&b.name, &b.category, &runs);
@@ -1073,8 +1256,34 @@ pub async fn analyze(
     r.found_instagram = found_instagram;
     enrich(&mut r, &b.name, mine.as_ref(), category.as_ref());
     // the name was ambiguous (little confirmed) → offer the entities we did find instead of guessing
+    if let Some(st) = &store {
+        let (good, bad, todo) = store_advice(st, !site_url.is_empty(), !handle.is_empty());
+        r.strengths.splice(0..0, good);
+        r.weaknesses.splice(0..0, bad);
+        r.actions.splice(0..0, todo);
+        if st.products > 0 {
+            r.confidence = r.confidence.max(60); // the brand's own store is first-hand evidence
+            r.evidence.insert(
+                0,
+                Evidence {
+                    fact: format!("{} محصول در فروشگاه خود برند", st.products),
+                    source: "فروشگاه برند".into(),
+                    url: st.url.clone(),
+                },
+            );
+        }
+    }
+    r.store = store;
     if r.confidence < 55 || r.market.offers == 0 {
         r.candidates = candidates(&b.name, mine.as_ref());
+    }
+    // nothing at all identified this brand: say how to define it instead of an empty report
+    r.undefined = r.products.is_empty() && site_url.is_empty() && r.insta.followers.is_none() && r.store.as_ref().is_none_or(|x| x.products == 0);
+    if r.undefined {
+        r.actions.insert(
+            0,
+            "برند را تعریف کنید: در فرم برند لینک غرفه باسلام (یا صفحه فروشگاه / کانال تلگرام)، سایت یا اینستاگرام را وارد کنید و دوباره تحلیل بزنید؛ تحلیل بر پایه محصولات واقعی همان فروشگاه انجام می‌شود.".into(),
+        );
     }
     db.brand_report_save(b.id, &r)?;
     Ok(r)
@@ -1126,6 +1335,26 @@ pub fn candidates(name: &str, mine: Option<&Report>) -> Vec<Candidate> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn small_brand_store_advice() {
+        use crate::products::Item;
+        let item = |t: &str, p: i64, r: Option<f64>, n: i64| Item { title: t.into(), price: p, rating: r, reviews: n, image: "x".into(), ..Default::default() };
+        let items = vec![
+            item("عسل گون ۱ کیلویی داراشکوه", 500_000, Some(4.8), 6),
+            item("عسل کنار ۱ کیلویی", 700_000, Some(4.0), 2),
+            item("عسل آویشن نیم کیلویی", 300_000, None, 0),
+        ];
+        let st = store_of("https://basalam.com/darashkooh", "", &items, "داراشکوه", 400_000, true);
+        assert_eq!((st.products, st.named, st.median), (3, 1, 500_000));
+        assert_eq!(st.rating, Some(4.6), "weighted by reviews");
+        assert_eq!(st.price_index, Some(150.0), "per kg: 500k, 700k, 600k → 600k vs 400k");
+        let (good, bad, todo) = store_advice(&st, false, false);
+        assert!(good.is_empty() || !good.iter().any(|g| g.contains("تنوع خوب")));
+        assert!(bad.iter().any(|b| b.contains("تنوع کم")) && bad.iter().any(|b| b.contains("نام برند")) && bad.iter().any(|b| b.contains("بالاتر")));
+        assert!(todo.iter().any(|t| t.contains("اینماد")) && todo.iter().any(|t| t.contains("اینستاگرام")));
+        assert!(store_advice(&Store::default(), true, true).2[0].contains("لینک غرفه"));
+    }
+
     use super::*;
     use crate::market::{analyze as market, Offer};
 

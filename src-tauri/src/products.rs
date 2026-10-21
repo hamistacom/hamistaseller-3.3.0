@@ -208,7 +208,7 @@ pub fn price_from_text(text: &str) -> i64 {
         } else {
             0.0
         };
-        if v >= 1_000.0 && v < 100_000_000_000.0 {
+        if (1_000.0..100_000_000_000.0).contains(&v) {
             return v as i64;
         }
     }

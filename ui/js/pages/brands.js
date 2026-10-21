@@ -78,17 +78,18 @@ function brandModal(b, done) {
   const cat = input({ value: b?.category || "", placeholder: "همان کالایی که در «محصول و قیمت» جستجو می‌کنید؛ مثلاً عسل" });
   const own = toggle("این برند ماست", !!b?.own);
   const note = input({ value: b?.note || "", placeholder: "اختیاری" });
+  const store = input({ value: b?.store || "", dir: "ltr", placeholder: "https://basalam.com/نام-غرفه" });
   modal({
     title: b?.id ? "ویرایش برند" : "افزودن برند",
     wide: true,
-    body: [h("div", { class: "grid-2" }, field("نام برند", name), field("دسته کالا", cat)), h("div", { class: "grid-2" }, field("سایت رسمی", site, "خالی بماند، از روی نام پیدا می‌شود"), field("اینستاگرام", ig, "خالی بماند، از روی نام پیدا می‌شود")), field("یادداشت", note), own.el],
+    body: [h("div", { class: "grid-2" }, field("نام برند", name), field("دسته کالا", cat)), h("div", { class: "grid-2" }, field("سایت رسمی", site, "خالی بماند، از روی نام پیدا می‌شود"), field("اینستاگرام", ig, "خالی بماند، از روی نام پیدا می‌شود")), field("فروشگاه برند (غرفه باسلام، صفحه محصولات یا کانال تلگرام)", store, "برای برندهای کوچک که در جستجو پیدا نمی‌شوند: تحلیل بر پایه محصولات، قیمت و نظرهای واقعی همین فروشگاه انجام می‌شود."), field("یادداشت", note), own.el],
     actions: [
       { label: "انصراف" },
       {
         label: "ذخیره",
         kind: "primary",
         onClick: async () => {
-          const id = await safe(invoke("brand_save", { brand: { id: b?.id || 0, name: name.value, website: site.value, instagram: ig.value, category: cat.value, note: note.value, own: own.input.checked } }), "ذخیره شد");
+          const id = await safe(invoke("brand_save", { brand: { id: b?.id || 0, name: name.value, website: site.value, instagram: ig.value, category: cat.value, note: note.value, store: store.value, own: own.input.checked } }), "ذخیره شد");
           if (id === undefined) return false;
           done(id);
         },
@@ -223,7 +224,7 @@ export async function render(root, params, actions) {
             h("div", { class: "card stack" }, h("div", { class: "card-h" }, h("h2", {}, "مقایسه ستون‌ها")), compare(analyzed)),
           )
         : null,
-      detail(cur, own),
+      detail(cur, own, () => brandModal(cur, reload)),
     );
   }
 
@@ -258,7 +259,28 @@ function compare(list) {
   );
 }
 
-function detail(b, own) {
+/** The brand's own store, read product by product. */
+function storeCard(st) {
+  if (!st) return null;
+  if (st.error) return h("div", { class: "callout" }, icon("alert"), h("div", { class: "small" }, h("b", {}, "فروشگاه برند خوانده نشد: "), st.error));
+  const kv = [
+    ["محصولات", `${fa(st.products)} محصول (${fa(st.priced)} با قیمت)`],
+    ["بازه قیمت", st.priced ? `${fa(st.min)} تا ${fa(st.max)} تومان · میانه ${fa(st.median)}` : "—"],
+    ["جایگاه قیمت", st.priceIndex ? `${fa(st.priceIndex)} (۱۰۰ = میانه بازار)` : "دسته کالا را در فرم برند بنویسید تا با بازار مقایسه شود"],
+    ["امتیاز خریداران", st.rating ? `${fa(st.rating)} از ۵ · ${fa(st.reviews)} نظر` : `${fa(st.reviews)} نظر`],
+    ["فروش ثبت‌شده", st.sales ? fa(st.sales) : "—"],
+    ["نام برند در عنوان", `${fa(st.named)} از ${fa(st.products)}`],
+  ];
+  return h(
+    "div",
+    { class: "card stack" },
+    h("div", { class: "card-h" }, h("h2", {}, "فروشگاه خود برند"), h("span", { class: "pill info" }, st.scope || "")),
+    h("dl", { class: "kv compact" }, kv.map(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
+    h("div", { class: "row" }, h("button", { class: "btn sm", type: "button", onclick: () => safe(invoke("open_url", { url: st.url })) }, icon("external", "sm"), "باز کردن فروشگاه"), h("button", { class: "btn sm ghost", type: "button", onclick: () => go("plist", { url: st.url }) }, icon("download", "sm"), "لیست کامل محصولات و اکسل")),
+  );
+}
+
+function detail(b, own, edit) {
   const r = b.report;
   if (!r) return h("div", { class: "card" }, h("div", { class: "empty" }, icon("award", "lg"), h("b", {}, `«${b.name}» هنوز تحلیل نشده است`), h("span", { class: "small" }, "«تحلیل» را روی کارت برند بزنید.")));
   const m = r.market || {};
@@ -280,6 +302,17 @@ function detail(b, own) {
       h("h2", {}, `جزئیات «${b.name}»`),
       r.confidence != null ? confBadge(r.confidence, "اعتماد داده") : null,
     ),
+    // a small brand nothing found: let the user define it instead of an empty report
+    r.undefined
+      ? h(
+          "div",
+          { class: "callout" },
+          icon("alert"),
+          h("div", { class: "grow small" }, h("b", {}, "این برند در جستجوها پیدا نشد. "), "برند را تعریف کنید: لینک غرفه باسلام (یا صفحه محصولات / کانال تلگرام)، سایت یا اینستاگرام برند را وارد کنید تا تحلیل بر پایه محصولات، قیمت‌ها و نظرهای واقعی همان فروشگاه انجام شود."),
+          edit ? h("button", { class: "btn sm primary", type: "button", onclick: edit }, icon("edit", "sm"), "تعریف برند") : null,
+        )
+      : null,
+    storeCard(r.store),
     // ambiguous name: show the entities we actually found instead of guessing
     r.candidates?.length
       ? h(
